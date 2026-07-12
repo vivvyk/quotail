@@ -17,19 +17,26 @@ your watchlist and control the terminal for you.
 
 ```sh
 cargo install quotail
-```
-
-That's it. **No API key. No account. No database. No configuration required.** It
-just runs:
-
-```sh
 quotail
 ```
 
-On first launch Quotail writes a default config (a starter watchlist of large-cap
-stocks, major crypto, and headline indices) and starts streaming quotes. Building
-from source instead? `git clone` and `cargo install --path .` (requires a recent
-Rust toolchain, edition 2024).
+On first launch, Quotail writes a default config to
+`~/.config/quotail/config.toml` and starts polling quotes. No API key or account is
+required.
+
+## Building from source
+
+```sh
+git clone https://github.com/vivvyk/quotail
+cd quotail
+cargo install --path .
+```
+
+## Requirements
+
+- **Rust 1.85+** (edition 2024) — to `cargo install` or build from source.
+- **Linux or macOS** — MCP session control uses a Unix domain socket.
+- **Network access** to Yahoo Finance.
 
 ---
 
@@ -52,7 +59,12 @@ Rust toolchain, edition 2024).
 
 ## Usage
 
-Launch with `quotail`, then press `?` at any time for the in-app help overlay.
+Launch with `quotail`. Press `?` for the in-app help overlay:
+
+![In-app help overlay](docs/screenshots/help.png)
+
+The detail view (`d`) shows a large chart with RSI, moving averages, volume, and a
+fundamentals rail:
 
 ![Detail view](docs/screenshots/detail.png)
 
@@ -77,7 +89,7 @@ Launch with `quotail`, then press `?` at any time for the in-app help overlay.
 | `x`               | remove symbol            |                     |                        |
 | `r`               | refresh data             |                     |                        |
 
-### Command line (`:`)
+### Commands
 
 | Command            | Effect                       |
 |--------------------|------------------------------|
@@ -93,7 +105,7 @@ indices.
 
 ---
 
-## MCP: connect Claude
+## MCP
 
 Quotail ships an **MCP server**. Point an MCP client such as Claude Code or Claude
 Desktop at it and Claude can **read your watchlist** *and* **drive the running
@@ -108,14 +120,14 @@ TUI** — add symbols, open charts, change the timeframe, and see what's on scre
 Claude calls `get_watchlist_quotes`, ranks your symbols by percent change, then
 calls `chart_symbol` three times — and the charts appear in your terminal.
 
-### Two tiers of tools
+### Tool Tiers
 
 - **READ tools** (`get_watchlist_quotes`, `get_candles`, `get_indicators`, …) read
   from Yahoo and your config, so they work **with or without** the TUI running.
 - **CONTROL / SESSION tools** (`add_symbol`, `chart_symbol`, `set_timeframe`,
   `get_session`, …) drive a **running TUI** over a local Unix socket.
 
-### Configure it
+### Setup
 
 Install a real binary, then register the server.
 
@@ -137,14 +149,8 @@ Or add it to your client's MCP config manually:
 }
 ```
 
-### No AI in the app
-
-**Quotail never calls an LLM.** The MCP server only serves data and drives the UI —
-the intelligence runs in *your* Claude client, on *your* account. That's why there
-is no API key anywhere in Quotail.
-
-See **[docs/MCP.md](docs/MCP.md)** for the full reference: every tool, its
-arguments and return shape, the socket's security model, and more example prompts.
+See [docs/MCP.md](docs/MCP.md) for the full reference: every tool, its arguments and
+return shape, the socket's security model, and more example prompts.
 
 ---
 
@@ -165,26 +171,9 @@ delete at any time.
 
 ---
 
-## Known limitations
-
-Quotail is honest about what it is:
-
-- **Yahoo Finance is an unofficial endpoint.** It has no public API contract. It
-  works today, and has for years, but it could change or break without notice.
-- **No market calendar.** Quotail has no holiday or half-day awareness; the
-  open/closed market status is approximate.
-- **Prices are polled, not streamed** (default every 60s) — Yahoo has no websocket.
-  That's why the status row shows a **Last Refresh** clock; press `r` to force one.
-- **MCP control tools need a running TUI.** The read tools don't, but `add_symbol`,
-  `chart_symbol`, `get_session`, and the rest require an instance to be up.
-
----
-
 ## License
 
 Licensed under either of
 
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
-
-at your option.
