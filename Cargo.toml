@@ -2,6 +2,14 @@
 name = "quotail"
 version = "0.1.0"
 edition = "2024"
+authors = ["Vivek Kumar <15kumarviv@gmail.com>"]
+description = "A terminal stock-market dashboard with live data and an MCP server that lets Claude read your watchlist and drive the TUI."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/vivvyk/quotail"
+homepage = "https://github.com/vivvyk/quotail"
+readme = "README.md"
+keywords = ["tui", "stocks", "finance", "terminal", "mcp"]
+categories = ["command-line-utilities", "visualization"]
 
 [dependencies]
 # --- TUI ---

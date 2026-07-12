@@ -22,8 +22,6 @@ pub mod table;
 use crate::app::View;
 
 /// Draw the whole frame: the current view, then the help overlay on top if open.
-/// The Settings screen reads/edits `state.config`; everything flows through
-/// `AppState`.
 pub fn render(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
     // Paint the theme background across the whole frame first. Later text is drawn

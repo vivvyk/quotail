@@ -4,7 +4,7 @@
 //! limiting, no retries beyond the one crumb-refresh below. `DataStore` adds all
 //! of that on top.
 //!
-//! Two endpoints, verified against the live API before this was written:
+//! Two endpoints:
 //! - v8 `/finance/chart/{sym}` — candles + a quote-like `meta`; needs no auth.
 //! - v7 `/finance/quote` — batch quotes + fundamentals in ONE call, but gated on
 //!   an `A3` cookie + a `crumb` token.
@@ -25,9 +25,7 @@ const COOKIE_URL: &str = "https://fc.yahoo.com/";
 pub struct YahooProvider {
     client: reqwest::Client,
     /// The `crumb` token, fetched lazily and reused. A `tokio::sync::Mutex`
-    /// (not `std::sync::Mutex`) because we hold the guard across `.await` while
-    /// fetching it, and a std guard is `!Send` — it would make the future unable
-    /// to move between tokio worker threads and fail to compile.
+    /// (not `std`) because the guard is held across `.await` while fetching it.
     crumb: Mutex<Option<String>>,
 }
 
@@ -54,7 +52,7 @@ impl YahooProvider {
             return Ok(c.clone());
         }
         // `fc.yahoo.com` 404s but still Set-Cookies the A3 token; the cookie
-        // store keeps it. We deliberately ignore the response status here.
+        // store keeps it.
         let _ = self.client.get(COOKIE_URL).send().await;
         let crumb = self
             .client
@@ -312,9 +310,8 @@ struct RawQuote {
     eps_trailing_twelve_months: Option<f64>,
     dividend_yield: Option<f64>,
     trailing_annual_dividend_yield: Option<f64>,
-    // NOTE: `beta` is NOT returned by the v7 /finance/quote endpoint. It lives in
-    // v10 /quoteSummary (defaultKeyStatistics). Left here (always None) until that
-    // second fetch is wired; the rail shows a blank until then.
+    // `beta` is NOT returned by the v7 /finance/quote endpoint; it lives in
+    // v10 /quoteSummary (defaultKeyStatistics), so it is always None here.
     beta: Option<f64>,
     market_state: Option<String>,
 }

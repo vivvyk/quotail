@@ -29,13 +29,8 @@ pub enum ProviderError {
     Unavailable(String),
 }
 
-/// `Send + Sync` is required: the provider is shared across tokio tasks
-/// inside an `Arc<DataStore>`, and the compiler will only permit that if it
-/// can prove the type is safe to move between and share across threads.
-///
-/// `#[async_trait]` is needed because native `async fn` in traits is not
-/// object-safe — and `DataStore` holds a `Box<dyn Provider>` so the source
-/// can be chosen at runtime.
+/// `DataStore` holds a `Box<dyn Provider>` so the data source can be chosen at
+/// runtime, and shares it across tokio tasks — hence `Send + Sync`.
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn name(&self) -> &str;

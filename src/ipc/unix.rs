@@ -18,7 +18,7 @@ use crate::action::{Action, RemoteAction};
 
 /// A socket message that expects a REPLY, unlike a fire-and-forget `RemoteAction`.
 /// Tagged by the same `action` field, so the two are disjoint by tag: a control
-/// line never parses as a query and vice versa. Only `get_session` for now.
+/// line never parses as a query and vice versa.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 enum SocketQuery {
@@ -105,7 +105,6 @@ pub fn spawn_listener(path: &Path, tx: UnboundedSender<Action>) -> BindOutcome {
 /// Accept connections forever, serving each on its own task so a slow client can't
 /// block the others. Ends when the listener errors (e.g. the socket is removed).
 async fn accept_loop(listener: UnixListener, tx: UnboundedSender<Action>) {
-    // Ends when the listener errors (e.g. the socket file is removed on quit).
     while let Ok((stream, _addr)) = listener.accept().await {
         tokio::spawn(serve_connection(stream, tx.clone()));
     }
@@ -125,7 +124,6 @@ async fn serve_connection(stream: UnixStream, tx: UnboundedSender<Action>) {
             continue;
         }
         if serde_json::from_str::<SocketQuery>(line).is_ok() {
-            // Reply-expecting query (only get_session today).
             if !answer_session(&tx, &mut write_half).await {
                 break;
             }
@@ -135,7 +133,6 @@ async fn serve_connection(stream: UnixStream, tx: UnboundedSender<Action>) {
                 break;
             }
         }
-        // else: malformed — drop it.
     }
 }
 
@@ -202,7 +199,6 @@ mod tests {
     use tokio::io::AsyncWriteExt;
     use tokio::sync::mpsc::{self, UnboundedReceiver};
 
-    /// A unique socket path under the OS temp dir for one test.
     fn temp_sock(tag: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
         // pid + tag keeps parallel test runs from colliding without needing a clock.
@@ -267,7 +263,6 @@ mod tests {
             .unwrap();
         client.flush().await.unwrap();
 
-        // The garbage line is dropped; the valid one still arrives.
         assert!(matches!(next_action(&mut rx).await, Action::AddSymbol(s) if s == "TSLA"));
         let _ = fs::remove_file(&path);
     }

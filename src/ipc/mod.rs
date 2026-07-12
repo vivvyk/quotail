@@ -1,4 +1,4 @@
-//! IPC: the TUI's MCP session socket — Step 2.
+//! IPC: the TUI's MCP session socket.
 //!
 //! A Unix domain socket listener that is just a FIFTH `tx.clone()` into the one
 //! `mpsc<Action>` channel. It reads a line, deserializes a [`RemoteAction`],

@@ -63,7 +63,7 @@ pub enum Action {
     ClearAllSlots,
     FocusSlot(usize),
     CycleSlotFocus,
-    /// Global across all panes and Detail (per-pane is a follow-up).
+    /// Global across all panes and Detail.
     SetTimeframe(Timeframe),
 
     // ---- Data (from fetch tasks — the async results coming home) --------
@@ -121,10 +121,9 @@ pub enum Action {
     SetStatus(String),
     // ---- MCP session read-back (request/response over the socket) ------
     /// `get_session`: the IPC task hands over a `oneshot` sender; the consumer —
-    /// sole owner of `AppState` — fills it with a `SessionSnapshot` and RETURNS.
-    /// It must NEVER await the reply, or the loop deadlocks (`update()` is sync,
-    /// so this is enforced by construction). If the receiver has already timed out
-    /// and dropped, `send` fails harmlessly.
+    /// sole owner of `AppState` — fills it with a `SessionSnapshot` and RETURNS. It
+    /// must NEVER await the reply, or the loop deadlocks. A dropped receiver (caller
+    /// timed out) just makes `send` fail harmlessly.
     SessionRequested {
         reply: oneshot::Sender<SessionSnapshot>,
     },

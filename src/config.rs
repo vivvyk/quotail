@@ -134,8 +134,8 @@ impl Config {
     }
 
     /// The MCP Unix-socket path with a leading `~/` expanded to the home dir.
-    /// Shared by the TUI's listener and (Step 3) the MCP server's client, so both
-    /// resolve to the exact same file.
+    /// Shared by the TUI's listener and the MCP server's client, so both resolve
+    /// to the exact same file.
     pub fn socket_path(&self) -> PathBuf {
         let raw = &self.mcp.socket_path;
         if let Some(rest) = raw.strip_prefix("~/")
@@ -255,7 +255,6 @@ mod tests {
             ],
         );
         let out = doc.to_string();
-        // Arrays reflect the new list, split by kind.
         let cfg: Config = toml::from_str(&out).unwrap();
         assert_eq!(cfg.watchlist.stocks, vec!["AAPL", "TSLA"]);
         assert_eq!(cfg.watchlist.crypto, vec!["BTC-USD"]);

@@ -185,7 +185,6 @@ fn render_volume(
     theme: Theme,
     area: Rect,
 ) {
-    // Title: "volume" in heading, the M/B numbers in cyan.
     let border = Style::default().fg(theme.border);
     let heading = Style::default().fg(theme.heading);
     let price = Style::default().fg(theme.price);
@@ -279,7 +278,6 @@ fn render_rsi(
     theme: Theme,
     area: Rect,
 ) {
-    // Title: "rsi (14)" in heading, the current value in cyan.
     let border = Style::default().fg(theme.border);
     let heading = Style::default().fg(theme.heading);
     let price = Style::default().fg(theme.price);
@@ -355,9 +353,9 @@ fn render_rsi_line(buf: &mut Buffer, area: Rect, columns: &[Option<chart::Column
 fn render_rail(buf: &mut Buffer, detail: Option<&DetailState>, theme: Theme, area: Rect) {
     let border = Style::default().fg(theme.border);
     let heading = Style::default().fg(theme.heading);
-    let muted = Style::default().fg(theme.muted); // labels
-    let fg = Style::default().fg(theme.fg); // ordinary values
-    let price = Style::default().fg(theme.price); // market cap
+    let muted = Style::default().fg(theme.muted);
+    let fg = Style::default().fg(theme.fg);
+    let price = Style::default().fg(theme.price);
     // The rail spans the full panel height; its content stays top-aligned (rows are
     // measured from the top border, and the rail is always anchored at y=0).
     super::draw_box(buf, area, "fundamentals", border, heading);
@@ -365,7 +363,6 @@ fn render_rail(buf: &mut Buffer, detail: Option<&DetailState>, theme: Theme, are
     let lx = area.x + 2; // label column
     let vend = area.x + DETAIL_RAIL_WIDTH - 3; // value right edge
 
-    // Row labels in muted, section headers in heading purple.
     for (row, text) in [
         (2, "market cap"),
         (3, "p/e (ttm)"),
@@ -396,7 +393,7 @@ fn render_rail(buf: &mut Buffer, detail: Option<&DetailState>, theme: Theme, are
 
     if let Some(f) = d.fundamentals.as_ref() {
         if let Some(v) = f.market_cap {
-            rail_value(buf, vend, 2, &fmt_cap(v), price); // market cap = cyan
+            rail_value(buf, vend, 2, &fmt_cap(v), price);
         }
         if let Some(v) = f.pe_trailing {
             rail_value(buf, vend, 3, &format!("{v:.1}"), fg);
@@ -496,7 +493,6 @@ fn render_range_bar(
     let hi_start = (area.x + DETAIL_RAIL_WIDTH - 3).saturating_sub(hi_s.chars().count() as u16 - 1);
     buf.set_string(hi_start, row, &hi_s, Style::default().fg(theme.muted));
 
-    // Track between the two labels.
     let track_start = lx + lo_s.chars().count() as u16 + 1;
     let track_end = hi_start.saturating_sub(1);
     if track_end <= track_start {
@@ -508,7 +504,7 @@ fn render_range_bar(
             track_start + x,
             row,
             glyph::RSI_BAND.to_string(),
-            Style::default().fg(theme.border), // bar line = border
+            Style::default().fg(theme.border),
         );
     }
     let t = if hi > lo {

@@ -190,9 +190,7 @@ fn spawn_market_status(ctx: &EventCtx) {
 fn spawn_poller(ctx: &EventCtx) {
     let tx = ctx.tx.clone();
     let period = ctx.config.poll_interval();
-    // Just the timing: emit `PollTick` and let the consumer fetch the LIVE
-    // watchlist. The first tick fires immediately, so this also does the initial
-    // load. (A config poll-interval change needs a restart to take effect.)
+    // A config poll-interval change needs a restart to take effect.
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(period);
         loop {
@@ -268,14 +266,11 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
                 update(state, next, ctx);
             }
         }
-        Action::Mouse(_) => {} // mouse is a step-4 bonus, never the only path
+        Action::Mouse(_) => {} // unused
         Action::SessionRequested { reply } => {
-            // MCP get_session: read the live state, fill the oneshot, and RETURN.
-            // Do NOT await the reply — `update()` is the sole owner of `&mut
-            // AppState`, and blocking here would deadlock the loop. If the caller
-            // has already timed out and dropped the receiver, `send` fails and we
-            // simply move on. `update()` being sync makes the no-await rule
-            // impossible to violate.
+            // Fill the oneshot and RETURN — never await the reply. `update()` is the
+            // sole owner of `&mut AppState`, so blocking here would deadlock the loop.
+            // If the caller timed out and dropped the receiver, `send` fails harmlessly.
             let _ = reply.send(build_session_snapshot(state));
         }
         Action::Resize(_, h) => {
@@ -303,7 +298,6 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
             spawn_fundamentals(ctx, symbol, false);
         }
         Action::Back => {
-            // Esc closes the help overlay first, else returns to Overview.
             if state.show_help {
                 state.show_help = false;
             } else {
@@ -410,7 +404,7 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
         Action::FocusSlot(i) => {
             if i < MAX_SLOTS {
                 state.focused_slot = i;
-                state.focus = FocusRegion::Grid; // focusing a pane focuses the grid
+                state.focus = FocusRegion::Grid;
             }
         }
         Action::CycleSlotFocus => {
@@ -630,7 +624,6 @@ fn adjust_scroll(state: &mut AppState) {
     }
 }
 
-/// Clamp the selection after the visible list shrinks (e.g. a removal).
 /// Move the selection cursor to `symbol` if it's currently visible (respecting the
 /// filter), scrolling it into view. A no-op if the symbol is filtered out.
 fn select_symbol(state: &mut AppState, symbol: &str) {
@@ -789,11 +782,10 @@ fn parse_command(buffer: &str) -> Vec<Action> {
     }
 }
 
-// ---- Headless runner (step 3: prove the pipeline, no UI) -------------------
+// ---- Headless runner (no UI) -----------------------------------------------
 
-/// Run the event loop with no TUI, printing quotes as they arrive. This is the
-/// step-3 deliverable; the ratatui frontend replaces the print/loop in step 4
-/// while reusing everything above unchanged.
+/// Run the event loop with no TUI, printing quotes as they arrive. Reuses the same
+/// producers and `update()` as the TUI runner.
 pub async fn run_headless(config: Config, store: Arc<DataStore>) -> anyhow::Result<()> {
     let session = crate::session::load();
     let config = Arc::new(config);

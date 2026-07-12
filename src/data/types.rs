@@ -118,15 +118,13 @@ impl Timeframe {
         }
     }
 
-    /// Yahoo `range` to FETCH. `min_bars` is the number of warmup bars required
-    /// BEFORE the visible window; callers pass `MA_LONG`, so the 200 is NOT
-    /// hardcoded here — we do arithmetic on a value we're given. Returns the
-    /// smallest range covering `min_bars + visible_bars(self)` native bars at
-    /// this timeframe's interval, so MA200 is defined across the whole visible
-    /// window (later sliced by timestamp; see `display_span`). If nothing covers
-    /// it, returns the widest range — the `fetch_range_*` tests then FAIL,
+    /// Yahoo `range` to FETCH. `min_bars` is the warmup bars required BEFORE the
+    /// visible window; callers pass `MA_LONG`, so the 200 is not hardcoded here.
+    /// Returns the smallest range covering `min_bars + visible_bars(self)` native
+    /// bars at this timeframe's interval, so MA200 is defined across the whole
+    /// visible window (later sliced by timestamp; see `display_span`). If nothing
+    /// covers it, returns the widest range — the `fetch_range_*` tests then FAIL,
     /// surfacing that the warmup outgrew what the source can supply.
-    /// Rationale: docs/STEP2_PROPOSAL.md.
     pub fn fetch_range_param(&self, min_bars: usize) -> &'static str {
         let required = min_bars + self.visible_bars();
         let ladder = self.range_ladder();

@@ -1,10 +1,8 @@
 //! Candlestick chart widget, shared by the grid panes and the Detail chart.
 //!
-//! This file has two halves:
-//!   1. `aggregate` — a PURE function (no ratatui) that slices the visible window
-//!      by timestamp and buckets native candles into `width` columns. Unit-tested
-//!      in isolation below. This is the OHLC aggregation deferred from step 2.
-//!   2. the rendering (added next), which turns `Column`s into the glyph grid.
+//! `aggregate` is a PURE function (no ratatui) that slices the visible window by
+//! timestamp and buckets native candles into `width` columns (unit-tested below);
+//! the renderer turns `Column`s into the glyph grid.
 //!
 //! Glyph contract (do not change): candle bodies `█`, wicks `│`, MA overlays `·`
 //! drawn ONLY where a cell is empty — a candle always wins.
@@ -159,7 +157,6 @@ pub fn render_grid_pane(
     }
     put(&mut cx, " ", border_style);
 
-    // Bottom border carrying the timeframe; then repaint just the tf label in warn.
     let by = area.y + area.height - 1;
     buf.set_string(
         area.x,

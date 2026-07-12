@@ -1,8 +1,8 @@
-//! MCP server (`quotail --mcp`). Read tools (Step 1) + session control (Step 3a).
+//! MCP server (`quotail --mcp`): read tools plus session control.
 //!
-//! This is the whole differentiator: Quotail has no AI inside it, so analysis
-//! happens by attaching Claude to THIS server. The tools are deliberately thin —
-//! deserialize args, call `DataStore` (or the socket), serialize the result.
+//! Quotail has no AI inside it, so analysis happens by attaching Claude to THIS
+//! server. The tools are deliberately thin — deserialize args, call `DataStore`
+//! (or the socket), serialize the result.
 //!
 //! Two capability tiers, with graceful degradation:
 //!   - READ tools serve straight from this process's OWN `DataStore` + cache (NOT
@@ -11,9 +11,7 @@
 //!   - SESSION-CONTROL tools drive a running TUI by writing a `RemoteAction` line
 //!     to its Unix socket (`crate::ipc`). No new command logic — the event loop
 //!     can't tell it from a keystroke. No TUI running ⇒ a clear, actionable error;
-//!     the read tools are unaffected. `get_session` (the read-back) is Step 3b.
-//!
-//! Layering: `mcp/` depends on `data/`, `config`, and `ipc` (the socket client).
+//!     the read tools are unaffected.
 //!
 //! stdio contract: stdout is the JSON-RPC channel. Nothing in this path may print
 //! to stdout — tool payloads travel as protocol messages, and errors go to stderr.
@@ -223,10 +221,9 @@ impl QuotailServer {
     }
 
     // ---- session control (drive a running TUI over the socket) --------------
-    // Each is a one-way RemoteAction; there is NO new command logic — the TUI's
-    // event loop treats it exactly like the equivalent keystroke. All require a
-    // running TUI and return a clear error if none is (the read tools above do
-    // not — they work regardless).
+    // Each is a one-way RemoteAction the event loop can't distinguish from the
+    // equivalent keystroke. All require a running TUI and error clearly if none
+    // is up; the read tools above work regardless.
 
     #[tool(
         description = "Add a symbol to the RUNNING TUI's watchlist (also persisted to \
@@ -436,7 +433,6 @@ impl QuotailServer {
 
 // ---- helpers ---------------------------------------------------------------
 
-/// Serialize any value as pretty JSON text wrapped in a tool result.
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, String> {
     let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))

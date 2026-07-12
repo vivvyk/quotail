@@ -1,6 +1,6 @@
-//! Quotail entry point. Parses args and dispatches to the TUI (`--mcp` and the
-//! JSON CLI are later phases). The module tree lives in the library crate
-//! (`src/lib.rs`) so every binary target shares it.
+//! Quotail entry point. Parses args and dispatches to the TUI, MCP server, or
+//! headless mode. The module tree lives in the library crate (`src/lib.rs`) so
+//! every binary target shares it.
 
 use std::sync::Arc;
 
@@ -42,7 +42,6 @@ async fn main() -> Result<()> {
     // First run generates ~/.config/quotail/config.toml from the bundled template.
     let config = config::load()?;
 
-    // The ratatui TUI is the default; both frontends share one event loop and store.
     if cli.headless {
         event_loop::run_headless(config, store).await
     } else {

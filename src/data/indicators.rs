@@ -5,8 +5,7 @@
 //!
 //! This module is the SINGLE SOURCE OF TRUTH for the indicator periods and RSI
 //! levels — they define what MA50 / MA200 / RSI(14) and the 70/30 bands *are*.
-//! `ui/` imports them from here: the `data/` → `ui/` ban is one-directional, so
-//! `ui/` depending on `data/` is fine, and no duplication is needed.
+//! `ui/` imports them from here rather than redefining them.
 
 use super::types::{Candle, Indicators};
 

@@ -1,8 +1,7 @@
-//! Watchlist table. Rendering lands in step 4; for now this owns the shared
-//! ORDERING — filter + sort — because two callers need the exact same order: the
-//! renderer (to draw rows) and key handling (to map the selected row back to a
-//! symbol). One source of truth, so the cursor never points at a different row
-//! than the one on screen.
+//! Watchlist table. Owns the shared ORDERING — filter + sort — because two callers
+//! need the exact same order: the renderer (to draw rows) and key handling (to map
+//! the selected row back to a symbol). One source of truth, so the cursor never
+//! points at a different row than the one on screen.
 
 use std::cmp::Ordering;
 
@@ -139,7 +138,6 @@ pub fn render(buf: &mut Buffer, area: Rect, state: &AppState) {
         put(&mut cx, " ", border);
     }
 
-    // Column headers + sort arrow, all in heading purple.
     let hy = area.y + 1;
     buf.set_string(x + 2, hy, "ticker", heading);
     put_right(buf, x + PRICE_END, hy, "price", heading);

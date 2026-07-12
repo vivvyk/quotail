@@ -52,8 +52,7 @@ impl Theme {
     };
 
     pub fn by_name(_name: &str) -> Theme {
-        // Only tokyonight exists in Phase 1; gruvbox / catppuccin / nord are
-        // follow-ups. Always the default until they land.
+        // Only tokyonight is implemented; every name falls back to it.
         Theme::TOKYONIGHT
     }
 

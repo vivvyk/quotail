@@ -342,26 +342,23 @@ mod tests {
     #[test]
     fn cycle_wraps_enum_and_number_rows() {
         let mut c = Config::default();
-        // theme (row 3) is an enum; forward wraps through the list.
         assert!(cycle(&mut c, 3, 1));
         assert_eq!(c.display.theme, "gruvbox");
         assert!(cycle(&mut c, 3, -1));
         assert_eq!(c.display.theme, "tokyonight");
-        // poll_interval_sec (row 9) is a number list.
         assert!(cycle(&mut c, 9, 1)); // 60 -> 300
         assert_eq!(c.data.poll_interval_sec, 300);
         assert!(cycle(&mut c, 9, 1)); // 300 -> 15 (wrap)
         assert_eq!(c.data.poll_interval_sec, 15);
-        // A non-cyclable row (socket_path) reports no change.
-        assert!(!cycle(&mut c, 12, 1));
+        assert!(!cycle(&mut c, 12, 1)); // socket_path is not cyclable
     }
 
     #[test]
     fn toggle_flips_only_bool_rows() {
         let mut c = Config::default();
-        assert!(toggle(&mut c, 7)); // ticker_scroll
+        assert!(toggle(&mut c, 7));
         assert!(!c.display.ticker_scroll);
-        assert!(toggle(&mut c, 11)); // mcp.enabled
+        assert!(toggle(&mut c, 11));
         assert!(!c.mcp.enabled);
         assert!(!toggle(&mut c, 3)); // theme is not a toggle
     }

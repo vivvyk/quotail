@@ -5,11 +5,9 @@
 //! indicators over the fully-warmed candle series so callers get MA/RSI already
 //! aligned to the candles.
 //!
-//! Shared as `Arc<DataStore>` across every tokio task (poller + fetch tasks), so
-//! it must be `Send + Sync`. It is, with no locks of our own: `DashMap` shards
-//! internally and the rate limiter is `Sync`. `Arc` (not clone-per-task) because
-//! the cache must be ONE shared cache — cloning would give each task its own
-//! empty map and defeat the point.
+//! Shared as one `Arc<DataStore>` across every tokio task (poller + fetch tasks)
+//! so they hit ONE cache — cloning per task would give each its own empty map.
+//! No locks of our own: `DashMap` shards internally.
 
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
@@ -119,9 +117,8 @@ impl DataStore {
     ) -> Result<CandleData, StoreError> {
         let key = (symbol.to_string(), timeframe);
         let ttl = Duration::from_secs(timeframe.ttl_secs());
-        // The `hit` DashMap guard lives only inside this `if` and is dropped
-        // before the re-insert below — holding it across the insert would
-        // deadlock the shard.
+        // The read guard is dropped before the re-insert below — holding it
+        // across the insert would deadlock the DashMap shard.
         if !force
             && let Some(hit) = self.candles.get(&key)
             && hit.fresh(ttl)
