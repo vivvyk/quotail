@@ -18,7 +18,7 @@ use quotail::event_loop;
     about = "Terminal market analysis for stocks, crypto, and indices."
 )]
 struct Cli {
-    /// Run the MCP server (Phase 2 — not yet implemented).
+    /// Run the MCP server over stdio (read tools work with or without a live TUI).
     #[arg(long)]
     mcp: bool,
     /// Run without the TUI, printing quotes to stdout. For debugging / CI, or a
@@ -30,13 +30,17 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let store = Arc::new(DataStore::new(Box::new(YahooProvider::new()?)));
+
+    // The MCP server reads the watchlist from config.toml per call, so it doesn't
+    // need config threaded in here — and it must not touch stdout (that's the
+    // JSON-RPC channel), so it dispatches before any config-load logging.
     if cli.mcp {
-        anyhow::bail!("--mcp is a Phase 2 feature and isn't built yet");
+        return quotail::mcp::run(store).await;
     }
 
     // First run generates ~/.config/quotail/config.toml from the bundled template.
     let config = config::load()?;
-    let store = Arc::new(DataStore::new(Box::new(YahooProvider::new()?)));
 
     // The ratatui TUI is the default; both frontends share one event loop and store.
     if cli.headless {

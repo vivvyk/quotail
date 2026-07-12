@@ -38,6 +38,13 @@ governor = "0.8"
 anyhow = "1"
 thiserror = "2"
 
+# --- MCP server (Phase 2) ---
+# 2.x is the current major of the official Rust MCP SDK (verified against the
+# modelcontextprotocol/rust-sdk examples, 2026-07). Features: `server` (pulls in
+# schemars for tool schemas), `macros` (#[tool]/#[tool_router]/#[tool_handler]),
+# `transport-io` (the stdio transport Claude Code/Desktop speak to).
+rmcp = { version = "2.2", features = ["server", "macros", "transport-io"] }
+
 # --- Misc ---
 chrono = { version = "0.4", features = ["serde", "clock"] }
 clap = { version = "4", features = ["derive"] }
