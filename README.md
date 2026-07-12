@@ -13,7 +13,7 @@ your watchlist and control the terminal for you.
 
 ---
 
-## Install
+## Install and Run
 
 ```sh
 cargo install quotail
@@ -30,6 +30,7 @@ required.
 git clone https://github.com/vivvyk/quotail
 cd quotail
 cargo install --path .
+quotail
 ```
 
 ## Requirements
