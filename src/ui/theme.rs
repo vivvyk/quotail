@@ -47,11 +47,10 @@ impl Theme {
         dim: Color::Rgb(0x23, 0x28, 0x38),
     };
 
-    pub fn by_name(name: &str) -> Theme {
-        match name {
-            // gruvbox / catppuccin / nord are follow-ups; default for now.
-            _ => Theme::TOKYONIGHT,
-        }
+    pub fn by_name(_name: &str) -> Theme {
+        // Only tokyonight exists in Phase 1; gruvbox / catppuccin / nord are
+        // follow-ups. Always the default until they land.
+        Theme::TOKYONIGHT
     }
 
     /// Color for a signed change value.

@@ -1,6 +1,7 @@
 //! Domain types. Provider-agnostic — this is the vocabulary the whole app speaks,
 //! and the exact shape that `--json` and the MCP tools serialize.
 
+use chrono::Duration;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,16 +111,73 @@ impl Timeframe {
         }
     }
 
-    /// Yahoo `range` parameter.
-    pub fn range_param(&self) -> &'static str {
+    /// Yahoo `range` to FETCH. `min_bars` is the number of warmup bars required
+    /// BEFORE the visible window; callers pass `MA_LONG`, so the 200 is NOT
+    /// hardcoded here — we do arithmetic on a value we're given. Returns the
+    /// smallest range covering `min_bars + visible_bars(self)` native bars at
+    /// this timeframe's interval, so MA200 is defined across the whole visible
+    /// window (later sliced by timestamp; see `display_span`). If nothing covers
+    /// it, returns the widest range — the `fetch_range_*` tests then FAIL,
+    /// surfacing that the warmup outgrew what the source can supply.
+    /// Rationale: docs/STEP2_PROPOSAL.md.
+    pub fn fetch_range_param(&self, min_bars: usize) -> &'static str {
+        let required = min_bars + self.visible_bars();
+        let ladder = self.range_ladder();
+        ladder
+            .iter()
+            .find(|(_, est)| *est >= required)
+            .or_else(|| ladder.last())
+            .map(|(range, _)| *range)
+            .expect("range_ladder is never empty")
+    }
+
+    /// Estimated NATIVE bars in the visible window — for FETCH SIZING ONLY (the
+    /// real visible slice is by timestamp; holidays make counts inexact). An
+    /// over-estimate is safe: it only widens the fetch.
+    fn visible_bars(&self) -> usize {
         match self {
-            Timeframe::D1 => "1d",
-            Timeframe::D5 => "5d",
-            Timeframe::M1 => "1mo",
-            Timeframe::M6 => "6mo",
-            Timeframe::Ytd => "ytd",
-            Timeframe::Y1 => "1y",
-            Timeframe::Max => "max",
+            Timeframe::D1 => 78,   // ~1 session of 5m bars
+            Timeframe::D5 => 65,   // ~5 sessions of 30m bars
+            Timeframe::M1 => 21,   // ~1 month of trading days
+            Timeframe::M6 => 126,  // ~6 months of trading days
+            Timeframe::Ytd => 252, // worst case: a full year of trading days
+            Timeframe::Y1 => 252,  // ~1 year of trading days
+            Timeframe::Max => 0,   // "max" already spans everything
+        }
+    }
+
+    /// Yahoo ranges valid at this timeframe's native interval, ASCENDING, each
+    /// paired with an estimate of the native bars it yields. `fetch_range_param`
+    /// takes the first that covers the requirement. Kept within Yahoo's
+    /// per-interval history caps (5m / 30m history ≤ ~60 days).
+    fn range_ladder(&self) -> &'static [(&'static str, usize)] {
+        match self.interval_param() {
+            "5m" => &[("1d", 78), ("5d", 390)],
+            "30m" => &[("5d", 65), ("1mo", 286)],
+            "1d" => &[
+                ("1mo", 21),
+                ("3mo", 63),
+                ("6mo", 126),
+                ("1y", 252),
+                ("2y", 504),
+            ],
+            _ => &[("max", usize::MAX)], // 1wk (the MAX timeframe)
+        }
+    }
+
+    /// The VISIBLE window this timeframe shows. The chart slices candles by
+    /// timestamp against this (never by bar count — holidays make counts wrong),
+    /// then buckets the slice into the pane's column width. YTD and MAX are not
+    /// fixed-length durations, so they are their own variants.
+    pub fn display_span(&self) -> DisplaySpan {
+        match self {
+            Timeframe::D1 => DisplaySpan::Last(Duration::days(1)),
+            Timeframe::D5 => DisplaySpan::Last(Duration::days(5)),
+            Timeframe::M1 => DisplaySpan::Last(Duration::days(30)),
+            Timeframe::M6 => DisplaySpan::Last(Duration::days(182)),
+            Timeframe::Ytd => DisplaySpan::Ytd,
+            Timeframe::Y1 => DisplaySpan::Last(Duration::days(365)),
+            Timeframe::Max => DisplaySpan::Max,
         }
     }
 
@@ -156,6 +214,19 @@ impl Timeframe {
     }
 }
 
+/// The visible time window of a chart, resolved against "now" by the renderer.
+/// Kept separate from `Timeframe` because YTD/MAX depend on the current date and
+/// on the available data, so they can't be a fixed `Duration`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplaySpan {
+    /// Visible window is `[now - duration, now]`.
+    Last(Duration),
+    /// Year-to-date: `[Jan 1 of the current year, now]`.
+    Ytd,
+    /// Everything available.
+    Max,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MarketStatus {
@@ -163,4 +234,79 @@ pub enum MarketStatus {
     Closed,
     PreMarket,
     AfterHours,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::indicators::MA_LONG;
+
+    /// The test's OWN estimate of native bars a (interval, range) yields —
+    /// independent of `Timeframe::range_ladder`. If that ladder is edited to
+    /// pick a too-narrow range, or `MA_LONG` grows past what a range can supply,
+    /// the coverage assertion below trips here rather than silently shipping an
+    /// all-`None` moving average. Panics on any (interval, range) it doesn't
+    /// model, so a new range choice can't slip through unasserted.
+    fn est_bars(interval: &str, range: &str) -> usize {
+        match (interval, range) {
+            ("5m", "1d") => 78,
+            ("5m", "5d") => 390,
+            ("30m", "5d") => 65,
+            ("30m", "1mo") => 286,
+            ("1d", "1mo") => 21,
+            ("1d", "3mo") => 63,
+            ("1d", "6mo") => 126,
+            ("1d", "1y") => 252,
+            ("1d", "2y") => 504,
+            ("1wk", "max") => usize::MAX,
+            other => panic!("unmodeled (interval, range) = {other:?}"),
+        }
+    }
+
+    /// The test's OWN estimate of native bars in each timeframe's visible span.
+    fn visible_bars(tf: Timeframe) -> usize {
+        match tf {
+            Timeframe::D1 => 78,
+            Timeframe::D5 => 65,
+            Timeframe::M1 => 21,
+            Timeframe::M6 => 126,
+            Timeframe::Ytd => 252,
+            Timeframe::Y1 => 252,
+            Timeframe::Max => 0,
+        }
+    }
+
+    #[test]
+    fn fetch_range_covers_warmup_plus_visible_for_every_timeframe() {
+        for &tf in &Timeframe::ALL {
+            let range = tf.fetch_range_param(MA_LONG);
+            let fetched = est_bars(tf.interval_param(), range);
+            let required = MA_LONG + visible_bars(tf);
+            assert!(
+                fetched >= required,
+                "{tf:?}: range {range:?} yields ~{fetched} bars but needs >= {required} \
+                 (warmup {MA_LONG} + visible {})",
+                visible_bars(tf),
+            );
+        }
+    }
+
+    #[test]
+    fn d5_is_the_tight_one_margin_is_real() {
+        // 30m interval: "1mo" yields ~286 bars; warmup 200 + visible ~65 = 265.
+        // A margin of ~21 bars — assert it, don't assume it.
+        let range = Timeframe::D5.fetch_range_param(MA_LONG);
+        assert_eq!(range, "1mo", "D5 range choice changed");
+        let fetched = est_bars("30m", range);
+        let required = MA_LONG + visible_bars(Timeframe::D5);
+        assert!(
+            fetched >= required,
+            "D5 no longer covered: {fetched} < {required}"
+        );
+        assert!(
+            fetched - required <= 40,
+            "D5 margin unexpectedly large ({} bars) — is the range wider than needed?",
+            fetched - required,
+        );
+    }
 }

@@ -54,11 +54,9 @@ pub const HELP_HEIGHT: u16 = 24;
 pub const BOTTOM_HEIGHT: u16 = 2;
 
 // ---- Indicators --------------------------------------------------------
-pub const RSI_PERIOD: usize = 14;
-pub const RSI_OVERBOUGHT: f64 = 70.0;
-pub const RSI_OVERSOLD: f64 = 30.0;
-pub const MA_SHORT: usize = 50;
-pub const MA_LONG: usize = 200;
+// Indicator periods & RSI levels live in their domain owner, data/indicators.rs
+// (single source of truth). `ui/` imports them from there — `ui/` may depend on
+// `data/`; the ban is one-directional.
 
 // ---- Ticker marquee ----------------------------------------------------
 /// Symbols shown in the scrolling hot-movers tape.

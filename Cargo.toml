@@ -4,3 +4,38 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# --- TUI ---
+# ratatui 0.29 pins crossterm 0.28. We also depend on crossterm DIRECTLY
+# (action.rs holds `KeyEvent`/`MouseEvent`), so the versions MUST match or the
+# key-event types the input task produces won't be the ones ratatui understands.
+ratatui = "0.29"
+# "event-stream" gives us an async Stream of terminal events so the input task
+# can `.await` keystrokes on the tokio runtime instead of blocking a thread.
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# --- Async runtime ---
+tokio = { version = "1", features = ["full"] }
+
+# --- HTTP / serialization ---
+# rustls-tls (not native-tls) so we don't drag in a system OpenSSL — keeps
+# `cargo install quotail` working on a bare machine, matching the "no setup" goal.
+# "cookies" is REQUIRED: Yahoo's v7 quote endpoint gates on an A3 cookie + crumb.
+# "gzip" transparently decompresses Yahoo's responses (they're gzipped).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "cookies", "gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# --- Data layer ---
+async-trait = "0.1"
+dashmap = "6"
+governor = "0.8"
+
+# --- Errors ---
+anyhow = "1"
+thiserror = "2"
+
+# --- Misc ---
+chrono = { version = "0.4", features = ["serde", "clock"] }
+clap = { version = "4", features = ["derive"] }
+directories = "6"

@@ -45,10 +45,16 @@ pub trait Provider: Send + Sync {
     /// Yahoo accepts a comma-joined symbol list, so this is ONE http call.
     async fn quotes(&self, symbols: &[String]) -> Result<Vec<Quote>, ProviderError>;
 
+    /// `min_bars` = warmup bars the caller needs BEFORE the visible window (the
+    /// store passes `MA_LONG`). The provider widens its fetch to cover the
+    /// warmup plus the visible span, so indicators are defined across the whole
+    /// display. It stays dumb: it does not know why 200, only that it must
+    /// return at least that much history ahead of what will be shown.
     async fn candles(
         &self,
         symbol: &str,
         timeframe: Timeframe,
+        min_bars: usize,
     ) -> Result<Vec<Candle>, ProviderError>;
 
     async fn fundamentals(&self, symbol: &str) -> Result<Fundamentals, ProviderError>;
