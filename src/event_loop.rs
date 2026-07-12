@@ -301,7 +301,7 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
             if state.show_help {
                 state.show_help = false;
             } else {
-                state.view = View::Overview;
+                enter_overview(state);
             }
         }
 
@@ -588,6 +588,21 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
 }
 
 // ---- Helpers ---------------------------------------------------------------
+
+/// Return to the Overview in a COHERENT state. `focus` and `input_mode` are
+/// Overview-scoped modes that other views ignore, so a `Back` from Detail/Settings
+/// must reset them or they leak in: e.g. focus left on `Grid` makes j/k (gated on
+/// `focus == Table`) silently dead on the watchlist. This is the single choke point
+/// for every "return to Overview" path — keep the invariant here, not at call sites.
+fn enter_overview(state: &mut AppState) {
+    state.view = View::Overview;
+    state.focus = FocusRegion::Table;
+    // Defensive: Esc-as-Back is only reachable with input_mode already Normal (in a
+    // `:`/`/` prompt, Esc exits the prompt instead). Forcing it keeps the invariant
+    // true even if a non-keyboard producer (MCP) changes the view mid-prompt.
+    state.input_mode = InputMode::Normal;
+    state.command_input.clear();
+}
 
 /// Refetch every open chart (grid panes + detail) at the current timeframe.
 fn refetch_charts(state: &mut AppState, ctx: &EventCtx, force: bool) {
