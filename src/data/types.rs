@@ -39,6 +39,13 @@ pub struct Quote {
     pub week52_range: (f64, f64),
     pub volume: Option<f64>,
     pub avg_volume: Option<f64>,
+    /// From Yahoo's batch quote response. `None` for indices (no market cap).
+    /// Drives the MarketCap table sort; `Fundamentals` keeps its own copy for
+    /// the Detail rail.
+    pub market_cap: Option<f64>,
+    /// Short exchange label ("NYSE", "NASDAQ", …) for the Detail status line.
+    /// `None` for many indices/crypto.
+    pub exchange: Option<String>,
     pub asset: AssetKind,
 }
 

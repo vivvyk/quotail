@@ -18,7 +18,7 @@
 use crossterm::event::{KeyEvent, MouseEvent};
 use serde::{Deserialize, Serialize};
 
-use crate::app::{AssetFilter, SortKey, View};
+use crate::app::{AssetFilter, FocusRegion, SortKey, View};
 use crate::data::types::{Candle, Fundamentals, Indicators, MarketStatus, Quote, Timeframe};
 
 #[derive(Debug, Clone)]
@@ -32,6 +32,8 @@ pub enum Action {
 
     // ---- Navigation ----------------------------------------------------
     SetView(View),
+    /// Move keyboard focus between the watchlist table and the chart grid (`h`/`l`).
+    SetFocus(FocusRegion),
     /// Open the drilldown for a symbol. From a table row (`d` / Enter) or MCP.
     OpenDetail(String),
     /// Esc: Detail/Settings -> Overview.

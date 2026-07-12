@@ -31,6 +31,15 @@ pub enum InputMode {
     Search,
 }
 
+/// Which Overview panel holds keyboard focus. `h`/`l` move between them and the
+/// renderer highlights the focused region's border. Ephemeral: deliberately NOT
+/// part of `Session`, so every launch starts on the table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusRegion {
+    Table,
+    Grid,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AssetFilter {
@@ -88,6 +97,9 @@ pub struct AppState {
     pub view: View,
     pub input_mode: InputMode,
     pub show_help: bool,
+    /// Which Overview panel has focus (watchlist table vs the 2x2 chart grid).
+    /// Ephemeral — not persisted; always starts on `Table`.
+    pub focus: FocusRegion,
 
     // ---- Watchlist / table ----
     pub watchlist: Vec<String>,

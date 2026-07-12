@@ -4,83 +4,95 @@ Character-exact reference renders. **Do not redesign these.**
 Every screen is exactly 96 columns wide. Candle/volume cells below are
 placeholders — the *frame* (borders, labels, column positions) is the contract.
 
+These blocks are captured at **96x31** (the snapshot target). The layout is
+**vertically responsive**: the bottom bar is always the last two rows, and the
+charts absorb extra height — see the notes per screen. Snapshot tests assert the
+frame at 96x31; separate tests check the responsive behavior at other sizes.
+
 ## Overview
 
-96x31. Left panel 40 cols, chart grid 56 cols (2x2 of 28x11).
+96x31. Left panel 40 cols, chart grid 56 cols. The grid is a 2x2 of 28-wide
+panes that **stretch vertically** to fill the rows between banner and bar; at
+96x31 each pane is 28x13. Watchlist and grid share that middle region.
 
 ```
 ┌─ hot movers ─────────────────────────────────────────────────────────────────────────────────┐
-│  ▲ NVDA +4.03%   ▲ AMD +2.71%   ▲ UNH +2.05%   ▼ SOL -1.35%   ▼ LLY -1.44%                   │
+│ ▲ NVDA +4.03%      ▲ UNH +2.05%      ▼ LLY -1.44%      ▲ AVGO +1.12%      ▼ MSFT -0.97%      │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
-┌─ watchlist ─ [All] Stk Cry Idx ──────┐┌─ NVDA 210.96 +4.03% ─────┐┌─ BTC-USD 63972 -0.24% ───┐
-│ ticker          price     chg% ▼     ││ █│ █ │││ │█ │ │││  │█ █│ ││    ██  ██│█│ │ █│ │ │█││ │
-│ AAPL           315.32   -0.28%      █││  █    │ │ █│  │█│││███ █ ││ │█  █│█│││█│███ ████││█│ │
-│ MSFT           456.66   -0.97%      █││ │█ ││  █  █  █  │││ ███│ ││  │█││ │█│██│█│  │ │█│█││ │
-│ NVDA           210.96   +4.03%      █││ ││││ │█ ││ ██│   █ │ │ █ ││ │█ ││█│ │ ││ ██ █│█│██ │ │
-│ AMZN           238.18   +0.11%      █││ ││█│  │ █ ││││ ██│█ █││█ ││ │││ │││█ █││█ │ █  █   │ │
-│ META           620.80   +0.43%      │││ ││█│█│█ ││  │ │█││█│ │█│ ││   █│█  │████ │   ████    │
-│ GOOGL          357.18   -0.48%      │││ │█│││█│█ ││││█││ █ █││█  ││       ████ █│  ││ ██  █│ │
-│ AVGO           182.44   +1.12%      │││ │█     │ ███ │███ ███│█  ││     ██│ █│││  █││ █│█    │
-│ TSLA           407.76   +0.30%      │││ █  █│ █││  █│█│██ █ │█││ ││ █  │█│││││█████││   │█   │
-│ BRK-B          498.10   +0.08%      ││└────────── 1M ────────────┘└────────── 1M ────────────┘
-│ LLY            812.35   -1.44%      ││┌─ AAPL 315.32 -0.28% ─────┐┌──────────────────────────┐
-│ JPM            264.90   +0.62%      │││ █││██││ │ │ │█│██ │││││  ││                          │
-│ V              341.20   +0.19%      │││ ██ █││    █│ █ █││ │ ││  ││                          │
-│ XOM            118.77   -0.31%      │││ ││██  █│██ │ █││││█││││█ ││                          │
-│ UNH            529.44   +2.05%      │││ █  █│  █ █│││   █ │██  │ ││                          │
-│                                     │││  │ █ │█ █││  ││ │ │█│█│█ ││      enter to chart      │
-│                                     │││  █   ││ █│█│██  ████││││ ││                          │
-│                                     │││ │ │ │ ││█│   ██│█│█│█ ││ ││                          │
-│                                     │││ █ │││ █   █│█ █│ █ │ │   ││                          │
-│                                     │││  ██ │█││██████│██│  │  █ ││                          │
-│                                     ││└────────── 1M ────────────┘└──────────────────────────┘
-│                                     ││                                                        
-│                                     ││                                                        
-│                                     ││                                                        
-└──────────────────────────────────────┘                                                        
- NYSE: Closed (Opens Mon 09:30)                    [1M]                  Last Refresh: 22:20:01 
+┌─ watchlist ─ [All] Stk Cry Idx ──────┐┌─ NVDA 210.96 +4.03% ─────┐┌─ BTC-USD ────────────────┐
+│ ticker          price     chg% ▼     ││                        │ ││                        │ │
+│ NVDA           210.96   +4.03%       ││                    ██│██ ││                    ██│██ │
+│ UNH            529.44   +2.05%       ││                ││██████  ││                ││██████  │
+│ AVGO           182.44   +1.12%       ││             ██│████      ││             ██│████      │
+│ JPM            264.90   +0.62%       ││          ││█████         ││          ││█████         │
+│ META           620.80   +0.43%       ││         ████│            ││         ████│            │
+│ TSLA           407.76   +0.30%       ││      ████│█│             ││      ████│█│             │
+│ V              341.20   +0.19%       ││   ││███││                ││   ││███││                │
+│ AMZN           238.18   +0.11%       ││  ████                    ││  ████                    │
+│ BRK-B          498.10   +0.08%       ││ ██ │                     ││ ██ │                     │
+│ AAPL           315.32   -0.28%       ││ █│                       ││ █│                       │
+│ XOM            118.77   -0.31%       │└────────── 1M ────────────┘└────────── 1M ────────────┘
+│ GOOGL          357.18   -0.48%       │┌─ AAPL 315.32 -0.28% ─────┐┌──────────────────────────┐
+│ MSFT           456.66   -0.97%       ││                        │ ││                          │
+│ LLY            812.35   -1.44%       ││                    ██│██ ││                          │
+│                                      ││                ││██████  ││                          │
+│                                      ││             ██│████      ││                          │
+│                                      ││          ││█████         ││                          │
+│                                      ││         ████│            ││      enter to chart      │
+│                                      ││      ████│█│             ││                          │
+│                                      ││   ││███││                ││                          │
+│                                      ││  ████                    ││                          │
+│                                      ││ ██ │                     ││                          │
+│                                      ││ █│                       ││                          │
+└──────────────────────────────────────┘└────────── 1M ────────────┘└──────────────────────────┘
+ NYSE: Closed                                      [1M]                  Last Refresh: 22:20:01 
  q quit  d detail  / search  f filter  s sort  c clear  tab pane  r refresh  : cmd  ? help      
 ```
 
 ## Detail
 
-96x31. Left column 64 cols, fundamentals rail 32 cols.
+96x31. Left column 64 cols, fundamentals rail 32 cols. The **main chart absorbs
+slack**; the volume (5) and rsi (6) strips stay fixed-height. At 96x31 the main
+chart is rows 0-17 (16 body rows).
 
 ```
-┌─ AAPL · Apple Inc. · $326.77  +1.23 (+0.38%) ────────────────┐┌─ fundamentals ───────────────┐
-│ ····················································  326.77 ││                              │
-│ ····················································         ││ market cap           $4.71 T │
-│ ····················································         ││ p/e (ttm)               32.4 │
-│ ····················································         ││ p/e (fwd)               28.1 │
-│ ····················································         ││ eps (ttm)               9.73 │
-│ ····················································         ││ div yield              0.42% │
-│ ····················································         ││ beta                    1.24 │
-│ ····················································  307.87 ││                              │
-│ ····················································         ││ day range                    │
-│ ····················································         ││ 312.17 ─────●──────── 316.91 │
-│ ····················································         ││                              │
-│ ····················································         ││ 52-wk range                  │
-│ ····················································         ││ 201.50 ──────────●─── 317.40 │
-│ ····················································  288.98 ││                              │
-└── ma50 ·── ma200 ·──────────────────────────────── 1M ───────┘│ indicators                   │
-┌─ volume  48.2M · avg 52.1M ──────────────────────────────────┐│ ma50               308.44  ▲ │
-│ ████████████████████████████████████████████████████     60M ││ ma200              291.02  ▲ │
-│ ████████████████████████████████████████████████████         ││ rsi (14)                61.2 │
-│ ████████████████████████████████████████████████████       0 ││                              │
-└──────────────────────────────────────────────────────────────┘│ session                      │
-┌─ rsi (14)  61.2 ─────────────────────────────────────────────┐│ open                  316.02 │
-│ ────────────────────────────────────────────────────      70 ││ prev close            316.22 │
-│                                                              ││ day high              316.91 │
-│                                                              ││ day low               312.17 │
-│ ────────────────────────────────────────────────────      30 ││                              │
+┌─ AAPL · Apple Inc. · $326.77  +1.24 (+0.38%) ────────────────┐┌─ fundamentals ───────────────┐
+│                                                   ██         ││                              │
+│                                           ███│  ████         ││ market cap           $4.71 T │
+│                                    ││   │█████████           ││ p/e (ttm)               32.4 │
+│                                   █████ ██   │█││            ││ p/e (fwd)               28.1 │
+│                            ███  │██ │████                    ││ eps (ttm)               9.73 │
+│                      │   │████████              ····         ││ div yield              0.42% │
+│                   │████████  │ │           ·····             ││ beta                    1.24 │
+│             │█   ███  ███             ·····                  ││                              │
+│            ███████                ····                       ││ day range                    │
+│      ██│ │██  │██│          ······                           ││ 323.50 ───────●────── 330.04 │
+│    ████████              ···                                 ││                              │
+│ ││██   ││           ·····                                    ││ 52-wk range                  │
+│ ███            ·····                         ·······         ││ 196.06 ────────────●─ 343.11 │
+│ ·············································                ││                              │
+│     ······                                                   ││ indicators                   │
+│ ····                                                         ││ ma50                  424.02 │
+└── ma50 ·── ma200 ·──────────────────────────────── 1M ───────┘│ ma200                 367.68 │
+┌─ volume  1.0M · avg 1.2M ────────────────────────────────────┐│ rsi (14)                68.2 │
+│                        █    █     █     █     █    █         ││                              │
+│    █ █  █  █ █   █ █   ██   ██    ██    █     █    █         ││ session                      │
+│ ████████████████████████████████████████████████████         ││ open                  326.77 │
+└──────────────────────────────────────────────────────────────┘│ prev close            326.77 │
+┌─ rsi (14)  68.2 ─────────────────────────────────────────────┐│ day high              330.04 │
+│ ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●─●●●●●         ││ day low               323.50 │
+│                                               ●              ││                              │
+│                                                              ││                              │
+│ ────────────────────────────────────────────────────         ││                              │
 └──────────────────────────────────────────────────────────────┘└──────────────────────────────┘
- NASDAQ: Closed (Opens Mon 09:30)                  [1M]                  Last Refresh: 22:20:01 
+ NASDAQ: Closed                                    [1M]                  Last Refresh: 22:20:01 
  esc back  / search  1-7 timeframe  e export  r refresh  : cmd  ? help  q quit                  
 ```
 
 ## Help overlay
 
-76-col box, centered (x=10), drawn over dimmed Overview.
+76-col box, centered (x=10), drawn over dimmed Overview. The dimmed screen shows
+through outside the box — that is intended overlay behavior.
 
 ```
           ┌─ help ─ ? or esc to close ───────────────────────────────────────────────┐          
@@ -111,15 +123,16 @@ placeholders — the *frame* (borders, labels, column positions) is the contract
 
 ## Settings
 
-96 cols, full width.
+96 cols, full width. Fixed-height content, top-aligned; the bar is anchored to
+the floor with blank slack between (rows 26-28 at 96x31).
 
 ```
 ┌─ settings ─ ~/.config/quotail/config.toml ───────────────────────────────────────────────────┐
 │                                                                                              │
 │  watchlist                                                                                   │
-│  stocks              50 symbols                  enter to edit  ·  top 50 by index weight    │
-│  crypto              10 symbols                  enter to edit                               │
-│  indices             8 symbols                   enter to edit                               │
+│  stocks              0 symbols                   enter to edit  ·  top 50 by index weight    │
+│  crypto              0 symbols                   enter to edit                               │
+│  indices             0 symbols                   enter to edit                               │
 │                                                                                              │
 │  display                                                                                     │
 │  theme               tokyonight                  < >  tokyonight, gruvbox, catppuccin, nord  │
@@ -135,12 +148,14 @@ placeholders — the *frame* (borders, labels, column positions) is the contract
 │                                                                                              │
 │  mcp                                                                                         │
 │  enabled             true                        space to toggle                             │
-│  socket_path         ~/.local/state/quotail.sock enter to edit                               │
+│  socket_path         …state/quotail/quotail.sock enter to edit                               │
 │                                                                                              │
 │  w writes changes to config.toml                                                             │
 │                                                                                              │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
- NYSE: Closed (Opens Mon 09:30)                                          Last Refresh: 22:20:01 
+                                                                                                
+                                                                                                
+                                                                                                
+ NYSE: Closed                                                            Last Refresh: 22:20:01 
  j/k move  enter edit  < > change  space toggle  w write  esc back  ? help  q quit              
 ```
-

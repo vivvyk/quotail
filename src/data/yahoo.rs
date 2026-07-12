@@ -215,6 +215,8 @@ fn map_quote(q: RawQuote) -> Quote {
         ),
         volume: q.regular_market_volume,
         avg_volume: q.average_daily_volume3_month,
+        market_cap: q.market_cap,
+        exchange: q.full_exchange_name.as_deref().map(short_exchange),
         asset: AssetKind::infer(&q.symbol),
         symbol: q.symbol,
     }
@@ -247,6 +249,18 @@ fn build_candles(result: ChartResult) -> Vec<Candle> {
         });
     }
     candles
+}
+
+/// Map Yahoo's `fullExchangeName` (e.g. "NasdaqGS", "NYSEArca") to a short label.
+fn short_exchange(full: &str) -> String {
+    let f = full.to_ascii_uppercase();
+    if f.contains("NASDAQ") || f == "NGM" || f == "NMS" {
+        "NASDAQ".into()
+    } else if f.contains("NYSE") {
+        "NYSE".into()
+    } else {
+        full.to_string()
+    }
 }
 
 fn net(e: reqwest::Error) -> ProviderError {
@@ -288,6 +302,7 @@ struct RawQuote {
     regular_market_volume: Option<f64>,
     average_daily_volume3_month: Option<f64>,
     market_cap: Option<f64>,
+    full_exchange_name: Option<String>,
     trailing_pe: Option<f64>,
     forward_pe: Option<f64>,
     eps_trailing_twelve_months: Option<f64>,

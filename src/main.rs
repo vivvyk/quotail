@@ -21,6 +21,10 @@ struct Cli {
     /// Run the MCP server (Phase 2 — not yet implemented).
     #[arg(long)]
     mcp: bool,
+    /// Run without the TUI, printing quotes to stdout. For debugging / CI, or a
+    /// terminal that can't do raw mode.
+    #[arg(long)]
+    headless: bool,
 }
 
 #[tokio::main]
@@ -34,7 +38,10 @@ async fn main() -> Result<()> {
     let config = config::load()?;
     let store = Arc::new(DataStore::new(Box::new(YahooProvider::new()?)));
 
-    // Step 3: headless runner that prints quotes. The ratatui TUI becomes the
-    // default here in step 4, reusing the same event loop and DataStore.
-    event_loop::run_headless(config, store).await
+    // The ratatui TUI is the default; both frontends share one event loop and store.
+    if cli.headless {
+        event_loop::run_headless(config, store).await
+    } else {
+        event_loop::run_tui(config, store).await
+    }
 }

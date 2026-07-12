@@ -12,11 +12,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::action::Action;
-use crate::app::{AppState, ChartSlot, DetailState, InputMode, Session, SortKey, View};
+use crate::app::{
+    AppState, ChartSlot, DetailState, FocusRegion, InputMode, Session, SortKey, View,
+};
 use crate::config::Config;
 use crate::data::store::DataStore;
 use crate::data::types::{Indicators, MarketStatus, Quote, Timeframe};
@@ -41,6 +43,7 @@ pub fn initial_state(config: &Config, session: Option<Session>) -> AppState {
         view: View::Overview,
         input_mode: InputMode::Normal,
         show_help: false,
+        focus: FocusRegion::Table,
         watchlist: config.watchlist(),
         quotes: HashMap::new(),
         filter: config.default_filter(),
@@ -70,7 +73,7 @@ pub fn initial_state(config: &Config, session: Option<Session>) -> AppState {
         for (i, sym) in s.slots.iter().enumerate() {
             if let Some(sym) = sym {
                 // Restored as loading placeholders; their candles are fetched
-                // at startup (see `run_headless`).
+                // at startup by the runner (via `refetch_charts`).
                 state.slots[i] = Some(ChartSlot {
                     symbol: sym.clone(),
                     candles: Vec::new(),
@@ -209,12 +212,40 @@ fn spawn_tick(tx: UnboundedSender<Action>, period: Duration) {
     });
 }
 
-/// Ctrl-C → clean `Quit`. Headless has no raw terminal, so this stands in for
-/// the `q` key until the TUI's input task exists (step 4).
+/// Ctrl-C → clean `Quit`. Used only in headless mode; under the TUI's raw terminal
+/// Ctrl-C arrives as a keystroke instead (handled in `key_to_action`).
 fn spawn_ctrl_c(tx: UnboundedSender<Action>) {
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
             let _ = tx.send(Action::Quit);
+        }
+    });
+}
+
+/// The TUI input producer: a dedicated OS thread doing the BLOCKING terminal read.
+/// It's a producer like any other — it forwards raw events as `Action`s and never
+/// touches state. A plain thread (not an async task) keeps the blocking read off
+/// the tokio worker pool and avoids pulling in a futures stream adapter.
+fn spawn_input(tx: UnboundedSender<Action>) {
+    use crossterm::event::{self, Event, KeyEventKind};
+    std::thread::spawn(move || {
+        loop {
+            match event::read() {
+                // Ignore key-release events (kitty / Windows emit them) so one
+                // keystroke isn't processed twice.
+                Ok(Event::Key(k)) if k.kind != KeyEventKind::Release => {
+                    if tx.send(Action::Key(k)).is_err() {
+                        break; // event loop gone — app is shutting down
+                    }
+                }
+                Ok(Event::Resize(w, h)) => {
+                    if tx.send(Action::Resize(w, h)).is_err() {
+                        break;
+                    }
+                }
+                Ok(_) => {} // mouse / focus / paste — unused
+                Err(_) => break,
+            }
         }
     });
 }
@@ -236,6 +267,7 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
 
         // ---- Navigation ----
         Action::SetView(view) => state.view = view,
+        Action::SetFocus(region) => state.focus = region,
         Action::OpenDetail(symbol) => {
             let symbol = symbol.to_uppercase();
             state.detail = Some(DetailState {
@@ -349,9 +381,13 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
         Action::FocusSlot(i) => {
             if i < MAX_SLOTS {
                 state.focused_slot = i;
+                state.focus = FocusRegion::Grid; // focusing a pane focuses the grid
             }
         }
-        Action::CycleSlotFocus => state.focused_slot = (state.focused_slot + 1) % MAX_SLOTS,
+        Action::CycleSlotFocus => {
+            state.focused_slot = (state.focused_slot + 1) % MAX_SLOTS;
+            state.focus = FocusRegion::Grid; // Tab focuses the grid, like FocusSlot
+        }
         Action::SetTimeframe(tf) => {
             if tf != state.timeframe {
                 state.timeframe = tf;
@@ -542,6 +578,13 @@ fn next_sort(sort: SortKey) -> SortKey {
 fn key_to_action(state: &AppState, key: &KeyEvent) -> Option<Action> {
     use KeyCode::*;
 
+    // Ctrl-C always quits. Raw mode stops the terminal from turning it into a
+    // SIGINT — it arrives as a keystroke — so handle it explicitly, and BEFORE mode
+    // dispatch so it also works while typing a `:` command (where plain `c` is text).
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == Char('c') {
+        return Some(Action::Quit);
+    }
+
     if matches!(state.input_mode, InputMode::Command | InputMode::Search) {
         return match key.code {
             Enter => Some(Action::SubmitInput),
@@ -560,8 +603,9 @@ fn key_to_action(state: &AppState, key: &KeyEvent) -> Option<Action> {
         Esc => Some(Action::Back),
         Char('d') => table::selected_symbol(state).map(Action::OpenDetail),
         Enter => table::selected_symbol(state).map(Action::AddToSlot),
-        Char('j') | Down => Some(Action::MoveSelection(1)),
-        Char('k') | Up => Some(Action::MoveSelection(-1)),
+        // Table navigation acts only when the table is focused; a no-op on the grid.
+        Char('j') | Down => (state.focus == FocusRegion::Table).then_some(Action::MoveSelection(1)),
+        Char('k') | Up => (state.focus == FocusRegion::Table).then_some(Action::MoveSelection(-1)),
         Char('g') => Some(Action::JumpTop),
         Char('G') => Some(Action::JumpBottom),
         Char('f') => Some(Action::SetFilter(state.filter.next())),
@@ -572,14 +616,24 @@ fn key_to_action(state: &AppState, key: &KeyEvent) -> Option<Action> {
         Char('x') => table::selected_symbol(state).map(Action::RemoveSymbol),
         Char('r') => Some(Action::Refresh),
         Tab => Some(Action::CycleSlotFocus),
-        // 1..7 select a timeframe globally.
+        Char('h') => Some(Action::SetFocus(FocusRegion::Table)),
+        Char('l') => Some(Action::SetFocus(FocusRegion::Grid)),
+        // Shift+1..4 focus a pane. Terminals deliver this two ways: the digit
+        // WITH a Shift modifier (kitty protocol), or the shifted symbol with no
+        // modifier (legacy). Handle both so it works either way.
+        Char(c @ '1'..='4') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            Some(Action::FocusSlot(c as usize - '1' as usize))
+        }
+        Char('!') => Some(Action::FocusSlot(0)),
+        Char('@') => Some(Action::FocusSlot(1)),
+        Char('#') => Some(Action::FocusSlot(2)),
+        Char('$') => Some(Action::FocusSlot(3)),
+        // 1..7 (unmodified) select a timeframe globally.
         Char(c @ '1'..='7') => {
             let idx = c as usize - '1' as usize;
             Some(Action::SetTimeframe(Timeframe::ALL[idx]))
         }
         _ => None,
-        // NOTE: h/l (table<->grid focus) and Shift+1..4 (focus pane n) need a
-        // focus-region field AppState doesn't have; deferred to step 4.
     }
 }
 
@@ -664,6 +718,72 @@ pub async fn run_headless(config: Config, store: Arc<DataStore>) -> anyhow::Resu
 
     crate::session::save(&session_snapshot(&state));
     println!("\nsession saved. bye.");
+    Ok(())
+}
+
+// ---- TUI runner (the default) ----------------------------------------------
+
+/// Run the full ratatui frontend. Reuses the exact same event loop, producers,
+/// and `DataStore` as headless — the ONLY differences are an input producer and
+/// that the consumer draws a frame after each action instead of printing.
+///
+/// The ONE rule still holds: producers (input thread, poller, tick, fetch tasks)
+/// feed one channel; the consumer below is the sole mutator and never awaits a
+/// network call. `terminal.draw` is fast local I/O, not a fetch.
+pub async fn run_tui(config: Config, store: Arc<DataStore>) -> anyhow::Result<()> {
+    let session = crate::session::load();
+    let config = Arc::new(config);
+    let mut state = initial_state(&config, session);
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let ctx = EventCtx {
+        tx: tx.clone(),
+        store,
+        config: config.clone(),
+    };
+
+    // Kick off fetches for restored charts, then start every producer.
+    refetch_charts(&mut state, &ctx, false);
+    spawn_poller(&ctx);
+    spawn_tick(tx.clone(), Duration::from_millis(MARQUEE_TICK_MS));
+    spawn_input(tx); // consumes the last `tx`; producers keep their own clones
+
+    // `try_init` enables raw mode, enters the alternate screen, and installs a
+    // panic hook that restores the terminal — so a panic mid-render won't leave the
+    // user's shell in raw mode.
+    let mut terminal = ratatui::try_init().map_err(|e| {
+        anyhow::anyhow!("could not start the TUI ({e}); not a terminal? try --headless")
+    })?;
+    let outcome = run_loop(&mut terminal, &mut state, &ctx, &mut rx).await;
+    ratatui::restore();
+
+    // Persist the session regardless of how the loop ended.
+    crate::session::save(&session_snapshot(&state));
+    outcome
+}
+
+/// The consumer loop: draw once, then redraw after each batch of actions. Bursts
+/// (e.g. a poll landing many quotes) are drained before drawing so we paint once.
+async fn run_loop(
+    terminal: &mut ratatui::DefaultTerminal,
+    state: &mut AppState,
+    ctx: &EventCtx,
+    rx: &mut mpsc::UnboundedReceiver<Action>,
+) -> anyhow::Result<()> {
+    let config = ctx.config.clone();
+    terminal.draw(|f| crate::ui::render(f, state, &config))?;
+
+    while let Some(action) = rx.recv().await {
+        update(state, action, ctx);
+        // Coalesce anything already queued so a burst redraws only once.
+        while let Ok(action) = rx.try_recv() {
+            update(state, action, ctx);
+        }
+        if state.should_quit {
+            break;
+        }
+        terminal.draw(|f| crate::ui::render(f, state, &config))?;
+    }
     Ok(())
 }
 

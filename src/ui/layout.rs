@@ -1,25 +1,26 @@
 //! Layout constants. These encode the visual contract in `docs/ASCII_REFERENCE.md`.
-//! Do not change these values — the snapshot tests assert against them.
+//!
+//! Only the truly FIXED dimensions live here. Everything that stretches with the
+//! terminal — pane widths/heights and the candle-column counts that follow from
+//! them — is DERIVED at render time from `frame.area()`, not stored as a constant.
+//! At 96x31 the derived values reduce to the historical ones (pane 28x13, 24
+//! candles; detail main 64 wide, 52 candles), which is what the snapshots pin.
 
-/// Reference terminal width used by snapshot tests.
+/// Reference terminal size used by the snapshot tests.
 pub const REF_WIDTH: u16 = 96;
-/// Reference terminal height used by snapshot tests.
 pub const REF_HEIGHT: u16 = 31;
+
+/// Below this the layout can't hold together, so we show a "too small" notice
+/// instead of attempting to render (prevents a panic / unreadable mess).
+pub const MIN_WIDTH: u16 = 80;
+pub const MIN_HEIGHT: u16 = 24;
 
 // ---- Overview ----------------------------------------------------------
 /// Hot-movers banner, including its top and bottom borders.
 pub const BANNER_HEIGHT: u16 = 3;
-/// Watchlist table panel width.
+/// Watchlist table panel width — FIXED (its content is fixed-column and gains
+/// nothing from extra width). The chart grid absorbs all horizontal slack.
 pub const WATCHLIST_WIDTH: u16 = 40;
-/// Chart grid width (2 panes across).
-pub const GRID_WIDTH: u16 = 56;
-/// A single chart pane in the 2x2 grid.
-pub const PANE_WIDTH: u16 = 28;
-pub const PANE_HEIGHT: u16 = 11;
-/// Candle columns inside a grid pane (PANE_WIDTH - 2 border - 2 padding).
-pub const PANE_CANDLES: usize = 24;
-/// Chart body rows inside a grid pane.
-pub const PANE_CHART_ROWS: usize = 9;
 /// Hard cap on chart panes. Enforced by the type: `[Option<ChartSlot>; MAX_SLOTS]`.
 pub const MAX_SLOTS: usize = 4;
 
@@ -29,16 +30,13 @@ pub const COL_PRICE: usize = 12;
 pub const COL_CHANGE_PCT: usize = 9;
 
 // ---- Detail ------------------------------------------------------------
-/// Left column (chart + volume + rsi).
-pub const DETAIL_MAIN_WIDTH: u16 = 64;
-/// Right rail (fundamentals).
+/// Right rail (fundamentals) width — FIXED, like the watchlist. The main chart
+/// takes the rest (`W - DETAIL_RAIL_WIDTH`).
 pub const DETAIL_RAIL_WIDTH: u16 = 32;
-/// Candle columns in the detail chart.
-pub const DETAIL_CANDLES: usize = 52;
-/// Price-axis gutter on the right of the detail chart.
+/// Price-axis gutter on the right of the detail chart. The candle-column count is
+/// `main_width - 4 - DETAIL_AXIS_WIDTH`.
 pub const DETAIL_AXIS_WIDTH: usize = 8;
-/// Body rows: main chart, volume histogram, rsi pane.
-pub const DETAIL_CHART_ROWS: usize = 14;
+/// Fixed-height strips (body rows, excluding their two borders).
 pub const DETAIL_VOLUME_ROWS: usize = 3;
 pub const DETAIL_RSI_ROWS: usize = 4;
 /// Fundamentals rail: label column then right-aligned value column.

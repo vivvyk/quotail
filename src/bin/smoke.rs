@@ -22,6 +22,7 @@ async fn main() -> anyhow::Result<()> {
         "  quote price : {:.2}   change {:+.2} ({:+.2}%)",
         q.price, q.change, q.change_pct
     );
+    println!("  market cap  : {:?}", q.market_cap);
 
     // 1Y timeframe → native 1d bars, fetched over ~2y so MA200 is warm.
     let data = store.candles("AAPL", Timeframe::Y1, true).await?;
