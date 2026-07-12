@@ -19,7 +19,7 @@
 mod unix;
 
 #[cfg(unix)]
-pub use unix::{BindOutcome, send_remote, spawn_listener};
+pub use unix::{BindOutcome, query_session, send_remote, spawn_listener};
 
 /// The result of trying to bind the session socket. On non-unix builds only the
 /// `Unsupported` shape exists; the caller maps every arm to a status either way.

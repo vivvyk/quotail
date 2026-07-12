@@ -182,6 +182,26 @@ impl McpListener {
     }
 }
 
+/// A read-only view of the live session for the MCP `get_session` tool. Built from
+/// `&AppState` by the event loop — the sole owner — and handed back over a
+/// `oneshot`, then serialized to JSON on the socket. Distinct from [`Session`] (the
+/// on-disk persistence type): this is Claude-facing, so the timeframe is the human
+/// label and the selected/detail symbols are resolved rather than raw indices.
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionSnapshot {
+    pub view: View,
+    /// Human timeframe label (e.g. `"1Y"`) — the same string `set_timeframe` takes.
+    pub timeframe: String,
+    /// The four chart panes in order; `None` is an empty pane.
+    pub slots: [Option<String>; MAX_SLOTS],
+    pub focused_slot: usize,
+    pub filter: AssetFilter,
+    /// Symbol highlighted in the watchlist table (`None` if the table is empty).
+    pub watchlist_selected: Option<String>,
+    /// The drilldown symbol when `view` is `Detail`; otherwise `None`.
+    pub detail_symbol: Option<String>,
+}
+
 /// The disposable slice of state written to `~/.local/state/quotail/session.json`
 /// on quit. NOT the config file — config is user intent (hand-edited, dotfile-able);
 /// this is ephemeral. If it is missing or corrupt, fall back to defaults SILENTLY.

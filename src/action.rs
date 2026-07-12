@@ -17,11 +17,15 @@
 
 use crossterm::event::{KeyEvent, MouseEvent};
 use serde::{Deserialize, Serialize};
+use tokio::sync::oneshot;
 
-use crate::app::{AssetFilter, FocusRegion, SortKey, View};
+use crate::app::{AssetFilter, FocusRegion, SessionSnapshot, SortKey, View};
 use crate::data::types::{Candle, Fundamentals, Indicators, MarketStatus, Quote, Timeframe};
 
-#[derive(Debug, Clone)]
+// NOT `Clone`: the `SessionRequested` variant carries a live `oneshot::Sender`,
+// which isn't clonable. Nothing in the app clones an `Action` (every producer
+// MOVES one into the channel), so this costs nothing.
+#[derive(Debug)]
 pub enum Action {
     // ---- Raw input (input task only) -----------------------------------
     // The input task is dumb: it forwards raw keys. The event loop interprets
@@ -115,6 +119,16 @@ pub enum Action {
     },
     /// Transient message in the status row (errors, confirmations).
     SetStatus(String),
+    // ---- MCP session read-back (request/response over the socket) ------
+    /// `get_session`: the IPC task hands over a `oneshot` sender; the consumer —
+    /// sole owner of `AppState` — fills it with a `SessionSnapshot` and RETURNS.
+    /// It must NEVER await the reply, or the loop deadlocks (`update()` is sync,
+    /// so this is enforced by construction). If the receiver has already timed out
+    /// and dropped, `send` fails harmlessly.
+    SessionRequested {
+        reply: oneshot::Sender<SessionSnapshot>,
+    },
+
     /// Periodic redraw. Drives the marquee and the clock. Note this means the
     /// app is never fully idle while ticker_scroll is on.
     Tick,

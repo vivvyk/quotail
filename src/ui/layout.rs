@@ -6,10 +6,6 @@
 //! At 96x31 the derived values reduce to the historical ones (pane 28x13, 24
 //! candles; detail main 64 wide, 52 candles), which is what the snapshots pin.
 
-/// Reference terminal size used by the snapshot tests.
-pub const REF_WIDTH: u16 = 96;
-pub const REF_HEIGHT: u16 = 31;
-
 /// Below this the layout can't hold together, so we show a "too small" notice
 /// instead of attempting to render (prevents a panic / unreadable mess).
 pub const MIN_WIDTH: u16 = 80;
@@ -24,11 +20,6 @@ pub const WATCHLIST_WIDTH: u16 = 40;
 /// Hard cap on chart panes. Enforced by the type: `[Option<ChartSlot>; MAX_SLOTS]`.
 pub const MAX_SLOTS: usize = 4;
 
-// Watchlist table column widths (sum + borders == WATCHLIST_WIDTH).
-pub const COL_TICKER: usize = 9;
-pub const COL_PRICE: usize = 12;
-pub const COL_CHANGE_PCT: usize = 9;
-
 // ---- Detail ------------------------------------------------------------
 /// Right rail (fundamentals) width — FIXED, like the watchlist. The main chart
 /// takes the rest (`W - DETAIL_RAIL_WIDTH`).
@@ -40,9 +31,6 @@ pub const DETAIL_AXIS_WIDTH: usize = 8;
 /// gave a row to each so the three panels feel more balanced.
 pub const DETAIL_VOLUME_ROWS: usize = 4;
 pub const DETAIL_RSI_ROWS: usize = 5;
-/// Fundamentals rail: label column then right-aligned value column.
-pub const RAIL_LABEL_WIDTH: usize = 15;
-pub const RAIL_VALUE_WIDTH: usize = 13;
 
 // ---- Help overlay ------------------------------------------------------
 pub const HELP_WIDTH: u16 = 76;

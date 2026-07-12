@@ -5,12 +5,28 @@ use std::io::ErrorKind;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::unix::OwnedWriteHalf;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 
 use crate::action::{Action, RemoteAction};
+
+/// A socket message that expects a REPLY, unlike a fire-and-forget `RemoteAction`.
+/// Tagged by the same `action` field, so the two are disjoint by tag: a control
+/// line never parses as a query and vice versa. Only `get_session` for now.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+enum SocketQuery {
+    GetSession,
+}
+
+/// The exact `get_session` request line the client sends (matches `SocketQuery`).
+const GET_SESSION_LINE: &[u8] = b"{\"action\":\"get_session\"}\n";
 
 /// Shown when the session socket can't be reached — no TUI, or only a stale file.
 /// Actionable (says how to fix it) and reassures that the read tools still work.
@@ -95,23 +111,86 @@ async fn accept_loop(listener: UnixListener, tx: UnboundedSender<Action>) {
     }
 }
 
-/// One connection: newline-delimited `RemoteAction` JSON. Each valid line becomes
-/// an `Action` sent into the shared channel — indistinguishable from a keystroke.
-/// Malformed lines are dropped (a client bug can't crash the TUI or inject data;
-/// `RemoteAction` already excludes `Key` and every data-result variant).
+/// One connection: newline-delimited JSON. A `get_session` query gets a snapshot
+/// written back; any other line is a fire-and-forget `RemoteAction` sent into the
+/// shared channel — indistinguishable from a keystroke. Malformed lines are dropped
+/// (a client bug can't crash the TUI or inject data; `RemoteAction` already excludes
+/// `Key` and every data-result variant).
 async fn serve_connection(stream: UnixStream, tx: UnboundedSender<Action>) {
-    let mut lines = BufReader::new(stream).lines();
+    let (read_half, mut write_half) = stream.into_split();
+    let mut lines = BufReader::new(read_half).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        if let Ok(remote) = serde_json::from_str::<RemoteAction>(line) {
+        if serde_json::from_str::<SocketQuery>(line).is_ok() {
+            // Reply-expecting query (only get_session today).
+            if !answer_session(&tx, &mut write_half).await {
+                break;
+            }
+        } else if let Ok(remote) = serde_json::from_str::<RemoteAction>(line) {
             // Receiver gone ⇒ app is shutting down; stop reading.
             if tx.send(Action::from(remote)).is_err() {
                 break;
             }
         }
+        // else: malformed — drop it.
+    }
+}
+
+/// Handle one `get_session`: hand the consumer a `oneshot` sender, await the
+/// snapshot it fills in, and write it back as a JSON line. Returns `false` (stop
+/// serving this connection) when the app is shutting down, the consumer drops the
+/// reply, or the socket write fails. Crucially the consumer fills the oneshot and
+/// returns WITHOUT awaiting us, so this await can't deadlock the event loop.
+async fn answer_session(tx: &UnboundedSender<Action>, w: &mut OwnedWriteHalf) -> bool {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    if tx
+        .send(Action::SessionRequested { reply: reply_tx })
+        .is_err()
+    {
+        return false; // consumer gone → app shutting down
+    }
+    let Ok(snapshot) = reply_rx.await else {
+        return false; // reply dropped without a value → close (client sees EOF)
+    };
+    let Ok(mut json) = serde_json::to_string(&snapshot) else {
+        return false;
+    };
+    json.push('\n');
+    w.write_all(json.as_bytes()).await.is_ok()
+}
+
+/// Client half of `get_session`: connect, send the query, and read one response
+/// line — with a TIMEOUT so a wedged event loop surfaces as an error, never a hang
+/// (the annoying failure mode). A missing/stale socket is [`NO_TUI`].
+pub async fn query_session(path: &Path, timeout: Duration) -> Result<String, String> {
+    let stream = UnixStream::connect(path)
+        .await
+        .map_err(|e| match e.kind() {
+            ErrorKind::NotFound | ErrorKind::ConnectionRefused => NO_TUI.to_string(),
+            _ => format!("could not reach the running Quotail TUI: {e}"),
+        })?;
+    let (read_half, mut write_half) = stream.into_split();
+    write_half
+        .write_all(GET_SESSION_LINE)
+        .await
+        .map_err(|e| format!("failed writing to the Quotail TUI socket: {e}"))?;
+    write_half.flush().await.map_err(|e| e.to_string())?;
+
+    let mut lines = BufReader::new(read_half).lines();
+    match tokio::time::timeout(timeout, lines.next_line()).await {
+        Err(_elapsed) => {
+            Err("timed out waiting for the Quotail TUI to reply — it may be busy or wedged".into())
+        }
+        Ok(Err(e)) => Err(format!(
+            "error reading the session from the Quotail TUI: {e}"
+        )),
+        Ok(Ok(None)) => {
+            Err("the Quotail TUI closed the connection without sending a session".into())
+        }
+        Ok(Ok(Some(line))) => Ok(line),
     }
 }
 
@@ -222,6 +301,73 @@ mod tests {
         // The original listener is untouched: it still delivers actions.
         send(&path, &RemoteAction::Refresh).await;
         assert!(matches!(next_action(&mut rx1).await, Action::Refresh));
+        let _ = fs::remove_file(&path);
+    }
+
+    fn sample_snapshot() -> crate::app::SessionSnapshot {
+        use crate::app::{AssetFilter, SessionSnapshot, View};
+        SessionSnapshot {
+            view: View::Overview,
+            timeframe: "1Y".to_string(),
+            slots: [Some("NVDA".to_string()), None, None, None],
+            focused_slot: 0,
+            filter: AssetFilter::All,
+            watchlist_selected: Some("AAPL".to_string()),
+            detail_symbol: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn get_session_round_trips_over_socket() {
+        let path = temp_sock("session");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        assert!(matches!(spawn_listener(&path, tx), BindOutcome::Bound(_)));
+
+        // Stand in for the event loop: fill the oneshot from a fixture and return —
+        // exactly what update()'s SessionRequested arm does.
+        tokio::spawn(async move {
+            if let Some(Action::SessionRequested { reply }) = rx.recv().await {
+                let _ = reply.send(sample_snapshot());
+            }
+        });
+
+        let json = query_session(&path, Duration::from_secs(5)).await.unwrap();
+        assert!(json.contains("\"timeframe\":\"1Y\""), "got: {json}");
+        assert!(
+            json.contains("NVDA") && json.contains("AAPL"),
+            "got: {json}"
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn get_session_times_out_when_reply_is_withheld() {
+        let path = temp_sock("session-timeout");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        assert!(matches!(spawn_listener(&path, tx), BindOutcome::Bound(_)));
+
+        // Stand-in that RECEIVES the request but HOLDS the sender without replying —
+        // a wedged event loop. Holding (not dropping) it means the client never gets
+        // an EOF, so ONLY its timeout can save it. This is the annoying hang the
+        // client-side timeout exists to prevent.
+        tokio::spawn(async move {
+            let held = rx.recv().await;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            drop(held);
+        });
+
+        let start = std::time::Instant::now();
+        let err = query_session(&path, Duration::from_millis(300))
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("timed out"),
+            "expected a timeout error, got: {err}"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "must fail fast, not hang"
+        );
         let _ = fs::remove_file(&path);
     }
 }

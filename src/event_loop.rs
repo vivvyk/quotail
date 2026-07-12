@@ -17,7 +17,8 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::action::Action;
 use crate::app::{
-    AppState, ChartSlot, DetailState, FocusRegion, InputMode, Session, SortKey, View,
+    AppState, ChartSlot, DetailState, FocusRegion, InputMode, Session, SessionSnapshot, SortKey,
+    View,
 };
 use crate::config::Config;
 use crate::data::store::DataStore;
@@ -100,6 +101,21 @@ pub fn session_snapshot(state: &AppState) -> Session {
         selected_row: state.selected_row,
         scroll_offset: state.scroll_offset,
         filter: state.filter,
+    }
+}
+
+/// A read-only snapshot of the live session for the MCP `get_session` tool. Pure
+/// read of `AppState` — resolves the selected/detail SYMBOLS (not raw indices) and
+/// the human timeframe label, so Claude gets values it can act on directly.
+fn build_session_snapshot(state: &AppState) -> SessionSnapshot {
+    SessionSnapshot {
+        view: state.view,
+        timeframe: state.timeframe.label().to_string(),
+        slots: std::array::from_fn(|i| state.slots[i].as_ref().map(|s| s.symbol.clone())),
+        focused_slot: state.focused_slot,
+        filter: state.filter,
+        watchlist_selected: table::selected_symbol(state),
+        detail_symbol: state.detail.as_ref().map(|d| d.symbol.clone()),
     }
 }
 
@@ -253,6 +269,15 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
             }
         }
         Action::Mouse(_) => {} // mouse is a step-4 bonus, never the only path
+        Action::SessionRequested { reply } => {
+            // MCP get_session: read the live state, fill the oneshot, and RETURN.
+            // Do NOT await the reply — `update()` is the sole owner of `&mut
+            // AppState`, and blocking here would deadlock the loop. If the caller
+            // has already timed out and dropped the receiver, `send` fails and we
+            // simply move on. `update()` being sync makes the no-await rule
+            // impossible to violate.
+            let _ = reply.send(build_session_snapshot(state));
+        }
         Action::Resize(_, h) => {
             // The renderer reads terminal size directly; we only cache how many
             // watchlist rows now fit so the scroll clamp keeps the selection in view.

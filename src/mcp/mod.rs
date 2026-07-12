@@ -20,6 +20,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -342,6 +343,19 @@ impl QuotailServer {
         )
         .await
     }
+
+    #[tool(
+        description = "Read the RUNNING TUI's current session state: the active view \
+        (overview/detail/settings), the four chart panes (symbols, in order), which \
+        pane is focused, the global timeframe (as a label like 1Y), the watchlist \
+        filter, the selected watchlist symbol, and the detail symbol if any. Call \
+        this to SEE what the user is currently looking at before acting — e.g. to \
+        target 'the focused pane' or 'the chart showing NVDA', or to confirm a \
+        command took effect. Requires a running Quotail TUI."
+    )]
+    async fn get_session(&self) -> Result<CallToolResult, String> {
+        self.session().await
+    }
 }
 
 #[tool_handler]
@@ -365,8 +379,10 @@ impl ServerHandler for QuotailServer {
                 ^GSPC for indices. If a Quotail TUI is running you can also DRIVE it: \
                 add_symbol, remove_symbol, chart_symbol (open a chart in the grid), \
                 open_detail, clear_slot, and set_timeframe (pass a human label like \
-                1Y). Those require a running TUI and error clearly if none is up; the \
-                read tools work either way."
+                1Y), and READ its live state with get_session (open charts, focused \
+                pane, timeframe, selection) — call that to see what the user is \
+                looking at before acting. Those require a running TUI and error \
+                clearly if none is up; the read tools work either way."
                     .to_string(),
             )
     }
@@ -393,6 +409,26 @@ impl QuotailServer {
         Err(
             "controlling a running TUI requires a Unix socket, which isn't available \
              on this platform"
+                .to_string(),
+        )
+    }
+
+    /// Read-back of the running TUI's session state. Round-trips a request over the
+    /// socket with a timeout, so a wedged TUI errors instead of hanging the tool.
+    #[cfg(unix)]
+    async fn session(&self) -> Result<CallToolResult, String> {
+        // 3s is orders of magnitude above the event loop's normal reply latency;
+        // only a truly wedged loop would hit it, and then we want an error, not a
+        // hang. The response is already JSON — relay it verbatim.
+        let json = crate::ipc::query_session(&self.socket_path, Duration::from_secs(3)).await?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(json)]))
+    }
+
+    #[cfg(not(unix))]
+    async fn session(&self) -> Result<CallToolResult, String> {
+        Err(
+            "reading a running TUI's session requires a Unix socket, which isn't \
+             available on this platform"
                 .to_string(),
         )
     }
