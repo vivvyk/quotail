@@ -61,7 +61,14 @@ fn render_banner(buf: &mut Buffer, state: &AppState, theme: Theme, w: u16) {
         width: w,
         height: BANNER_HEIGHT,
     };
-    super::draw_box(buf, area, "hot movers", Style::default().fg(theme.border));
+    // "hot movers" in accent orange — the most visible title on the screen.
+    super::draw_box(
+        buf,
+        area,
+        "hot movers",
+        Style::default().fg(theme.border),
+        Style::default().fg(theme.accent),
+    );
 
     // The tape is one styled cell per column so up/down arrows keep their color.
     // Content is masked in the snapshot (data-dependent); this is the live view.
@@ -152,24 +159,27 @@ fn render_grid(buf: &mut Buffer, state: &AppState, theme: Theme, grid_y: u16, gr
 
         match &state.slots[i] {
             Some(slot) => {
-                let title = pane_title(&slot.symbol, state.quotes.get(&slot.symbol));
+                let quote = state.quotes.get(&slot.symbol);
+                let price = quote.map(|q| fmt_price(q.price));
+                let change = quote.map(|q| q.change_pct);
                 // Candle columns = interior width (pane minus 2 borders + 2 pads).
                 // Overview panes carry candles only — indicators live on the Detail
                 // view, so there are no MA dots to sample here.
                 let cols = pw.saturating_sub(4) as usize;
                 let columns = chart::aggregate(&slot.candles, &Indicators::default(), span, cols);
-                chart::render_grid_pane(buf, area, &title, &columns, tf_label, border);
+                chart::render_grid_pane(
+                    buf,
+                    area,
+                    &slot.symbol,
+                    price.as_deref(),
+                    change,
+                    &columns,
+                    tf_label,
+                    border,
+                );
             }
             None => chart::render_empty_pane(buf, area, border),
         }
-    }
-}
-
-/// Pane title: `SYM price +chg%` when a quote is known, else just the symbol.
-fn pane_title(symbol: &str, quote: Option<&Quote>) -> String {
-    match quote {
-        Some(q) => format!("{symbol} {} {:+.2}%", fmt_price(q.price), q.change_pct),
-        None => symbol.to_string(),
     }
 }
 

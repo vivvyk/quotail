@@ -22,7 +22,7 @@ use crate::app::{
 use crate::config::Config;
 use crate::data::store::DataStore;
 use crate::data::types::{Indicators, MarketStatus, Quote, Timeframe};
-use crate::ui::layout::{MARQUEE_TICK_MS, MAX_SLOTS};
+use crate::ui::layout::{BANNER_HEIGHT, BOTTOM_HEIGHT, MARQUEE_TICK_MS, MAX_SLOTS};
 use crate::ui::table;
 
 /// Handles every producer and `update()` need. `tx` is cloned per producer; the
@@ -51,6 +51,7 @@ pub fn initial_state(config: &Config, session: Option<Session>) -> AppState {
         sort_desc: true,
         selected_row: 0,
         scroll_offset: 0,
+        viewport_rows: table::TABLE_VISIBLE_ROWS,
         slots: [None, None, None, None],
         focused_slot: 0,
         timeframe: config.default_timeframe(),
@@ -60,6 +61,8 @@ pub fn initial_state(config: &Config, session: Option<Session>) -> AppState {
         last_refresh: Utc::now(),
         status_msg: None,
         marquee_offset: 0,
+        config: config.clone(),
+        settings_row: 0,
         should_quit: false,
     };
 
@@ -168,31 +171,17 @@ fn spawn_market_status(ctx: &EventCtx) {
 /// Polls quotes + market status on the configured interval. `tokio::time::interval`
 /// fires its first tick immediately, so this doubles as the initial fetch.
 fn spawn_poller(ctx: &EventCtx) {
-    let store = ctx.store.clone();
     let tx = ctx.tx.clone();
-    let symbols = ctx.config.watchlist();
     let period = ctx.config.poll_interval();
+    // Just the timing: emit `PollTick` and let the consumer fetch the LIVE
+    // watchlist. The first tick fires immediately, so this also does the initial
+    // load. (A config poll-interval change needs a restart to take effect.)
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(period);
         loop {
             ticker.tick().await;
-            match store.quotes(&symbols, false).await {
-                Ok(quotes) => {
-                    if tx.send(Action::QuotesUpdated(quotes)).is_err() {
-                        break; // receiver gone: app is shutting down
-                    }
-                }
-                Err(e) => {
-                    if tx
-                        .send(Action::SetStatus(format!("poll failed: {e}")))
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            }
-            if let Ok(status) = store.market_status().await {
-                let _ = tx.send(Action::MarketStatusUpdated(status));
+            if tx.send(Action::PollTick).is_err() {
+                break; // receiver gone: app is shutting down
             }
         }
     });
@@ -263,7 +252,11 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
             }
         }
         Action::Mouse(_) => {} // mouse is a step-4 bonus, never the only path
-        Action::Resize(_, _) => {} // the TUI reads terminal size directly
+        Action::Resize(_, h) => {
+            // The renderer reads terminal size directly; we only cache how many
+            // watchlist rows now fit so the scroll clamp keeps the selection in view.
+            state.viewport_rows = watchlist_rows(h);
+        }
 
         // ---- Navigation ----
         Action::SetView(view) => state.view = view,
@@ -295,14 +288,20 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
         // ---- Watchlist ----
         Action::AddSymbol(symbol) => {
             let symbol = symbol.to_uppercase();
-            if !state.watchlist.iter().any(|s| s == &symbol) {
+            if state.watchlist.iter().any(|s| s == &symbol) {
+                state.status_msg = Some(format!("{symbol} is already in the watchlist"));
+            } else {
                 state.watchlist.push(symbol.clone());
                 spawn_quotes(ctx, vec![symbol.clone()], true); // immediate feedback
-                state.status_msg = Some(format!("added {symbol}"));
+                // Move the cursor to the new row so it's visible even when it has no
+                // quote yet and sorts to the bottom.
+                select_symbol(state, &symbol);
+                state.status_msg = Some(persist_msg(state, format!("added {symbol}")));
             }
         }
         Action::RemoveSymbol(symbol) => {
             let symbol = symbol.to_uppercase();
+            let existed = state.watchlist.iter().any(|s| s == &symbol);
             state.watchlist.retain(|s| s != &symbol);
             state.quotes.remove(&symbol);
             for slot in state.slots.iter_mut() {
@@ -311,7 +310,11 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
                 }
             }
             clamp_selection(state);
-            state.status_msg = Some(format!("removed {symbol}"));
+            state.status_msg = Some(if existed {
+                persist_msg(state, format!("removed {symbol}"))
+            } else {
+                format!("{symbol} was not in the watchlist")
+            });
         }
         Action::SetFilter(filter) => {
             state.filter = filter;
@@ -385,8 +388,21 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
             }
         }
         Action::CycleSlotFocus => {
-            state.focused_slot = (state.focused_slot + 1) % MAX_SLOTS;
-            state.focus = FocusRegion::Grid; // Tab focuses the grid, like FocusSlot
+            // One focus RING: table → pane 0 → 1 → 2 → 3 → table. Lets you fill and
+            // walk all four panes with Tab alone, never bouncing via h/l.
+            match state.focus {
+                FocusRegion::Table => {
+                    state.focus = FocusRegion::Grid;
+                    state.focused_slot = 0;
+                }
+                FocusRegion::Grid => {
+                    if state.focused_slot + 1 < MAX_SLOTS {
+                        state.focused_slot += 1;
+                    } else {
+                        state.focus = FocusRegion::Table;
+                    }
+                }
+            }
         }
         Action::SetTimeframe(tf) => {
             if tf != state.timeframe {
@@ -496,6 +512,28 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
             }
         }
 
+        // ---- Settings editing ----
+        Action::SettingsNav(delta) => {
+            let n = crate::ui::settings::ROW_COUNT as i32;
+            state.settings_row = (state.settings_row as i32 + delta).rem_euclid(n) as usize;
+        }
+        Action::SettingsCycle(delta) => {
+            if !crate::ui::settings::cycle(&mut state.config, state.settings_row, delta) {
+                state.status_msg = Some("this field isn't cyclable — see its hint".into());
+            }
+        }
+        Action::SettingsToggle => {
+            if !crate::ui::settings::toggle(&mut state.config, state.settings_row) {
+                state.status_msg = Some("this field isn't a toggle — see its hint".into());
+            }
+        }
+        Action::SettingsWrite => {
+            state.status_msg = Some(match crate::config::save(&state.config, &state.watchlist) {
+                Ok(()) => "wrote config.toml (some changes apply on restart)".into(),
+                Err(e) => format!("write failed: {e}"),
+            });
+        }
+
         // ---- Overlays / misc ----
         Action::ToggleHelp => state.show_help = !state.show_help,
         Action::Export { path } => {
@@ -519,6 +557,12 @@ pub fn update(state: &mut AppState, action: Action, ctx: &EventCtx) {
         }
         Action::SetStatus(msg) => state.status_msg = Some(msg),
         Action::Tick => state.marquee_offset = state.marquee_offset.wrapping_add(1),
+        Action::PollTick => {
+            // Poll the LIVE watchlist so `:add`ed symbols are included; cache TTL
+            // still applies (not forced).
+            spawn_quotes(ctx, state.watchlist.clone(), false);
+            spawn_market_status(ctx);
+        }
         Action::Quit => state.should_quit = true,
     }
 }
@@ -542,9 +586,17 @@ fn refetch_charts(state: &mut AppState, ctx: &EventCtx, force: bool) {
     }
 }
 
-/// Keep the scroll window so the selected row stays visible (14-row body).
+/// Watchlist body rows for a given terminal height: the mid region (terminal minus
+/// banner and floor bar) minus the table's own title/header/border, matching what
+/// `overview::render` hands the table. Single source of truth for the scroll clamp.
+fn watchlist_rows(term_height: u16) -> usize {
+    let mid_h = term_height.saturating_sub(BANNER_HEIGHT + BOTTOM_HEIGHT);
+    table::visible_rows(mid_h)
+}
+
+/// Keep the scroll window so the selected row stays visible in the current viewport.
 fn adjust_scroll(state: &mut AppState) {
-    let rows = table::TABLE_VISIBLE_ROWS;
+    let rows = state.viewport_rows.max(1);
     if state.selected_row < state.scroll_offset {
         state.scroll_offset = state.selected_row;
     } else if state.selected_row >= state.scroll_offset + rows {
@@ -553,6 +605,27 @@ fn adjust_scroll(state: &mut AppState) {
 }
 
 /// Clamp the selection after the visible list shrinks (e.g. a removal).
+/// Move the selection cursor to `symbol` if it's currently visible (respecting the
+/// filter), scrolling it into view. A no-op if the symbol is filtered out.
+fn select_symbol(state: &mut AppState, symbol: &str) {
+    if let Some(row) = table::visible_symbols(state)
+        .iter()
+        .position(|s| s == symbol)
+    {
+        state.selected_row = row;
+        adjust_scroll(state);
+    }
+}
+
+/// Persist the watchlist to `config.toml`; fold any write error into the status
+/// message so the user isn't told it saved when it didn't.
+fn persist_msg(state: &AppState, ok: String) -> String {
+    match crate::config::persist_watchlist(&state.watchlist) {
+        Ok(()) => ok,
+        Err(e) => format!("{ok} (config not saved: {e})"),
+    }
+}
+
 fn clamp_selection(state: &mut AppState) {
     let n = table::visible_symbols(state).len();
     if n == 0 {
@@ -591,6 +664,29 @@ fn key_to_action(state: &AppState, key: &KeyEvent) -> Option<Action> {
             Esc => Some(Action::ExitInputMode),
             Backspace => Some(Action::InputBackspace),
             Char(c) => Some(Action::InputChar(c)),
+            _ => None,
+        };
+    }
+
+    // Settings has its own keymap (edit, don't navigate charts). Overview/Detail
+    // keys must not leak in here.
+    if state.view == View::Settings {
+        return match key.code {
+            Char('q') => Some(Action::Quit),
+            Char('?') => Some(Action::ToggleHelp),
+            Char(':') => Some(Action::EnterCommandMode),
+            Char('/') => Some(Action::EnterSearchMode),
+            Esc => Some(Action::Back),
+            Char('j') | Down => Some(Action::SettingsNav(1)),
+            Char('k') | Up => Some(Action::SettingsNav(-1)),
+            // `<`/`>` are the shifted `,`/`.`; accept both spellings.
+            Char('<') | Char(',') => Some(Action::SettingsCycle(-1)),
+            Char('>') | Char('.') => Some(Action::SettingsCycle(1)),
+            Char(' ') => Some(Action::SettingsToggle),
+            Char('w') => Some(Action::SettingsWrite),
+            Enter => Some(Action::SetStatus(
+                "inline text edit is TBD — use :add/:rm or edit config.toml".into(),
+            )),
             _ => None,
         };
     }
@@ -770,8 +866,12 @@ async fn run_loop(
     ctx: &EventCtx,
     rx: &mut mpsc::UnboundedReceiver<Action>,
 ) -> anyhow::Result<()> {
-    let config = ctx.config.clone();
-    terminal.draw(|f| crate::ui::render(f, state, &config))?;
+    // Seed the viewport from the real terminal height before the first navigation,
+    // so the scroll clamp is correct even before any Resize event arrives.
+    if let Ok(size) = terminal.size() {
+        state.viewport_rows = watchlist_rows(size.height);
+    }
+    terminal.draw(|f| crate::ui::render(f, state))?;
 
     while let Some(action) = rx.recv().await {
         update(state, action, ctx);
@@ -782,7 +882,7 @@ async fn run_loop(
         if state.should_quit {
             break;
         }
-        terminal.draw(|f| crate::ui::render(f, state, &config))?;
+        terminal.draw(|f| crate::ui::render(f, state))?;
     }
     Ok(())
 }

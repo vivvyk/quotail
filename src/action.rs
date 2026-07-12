@@ -94,6 +94,16 @@ pub enum Action {
     /// Enter: parse the buffer and dispatch the resulting Action(s).
     SubmitInput,
 
+    // ---- Settings editing ----------------------------------------------
+    /// Move the selected settings row (j/k).
+    SettingsNav(i32),
+    /// Cycle the selected row's enum/number value (`<` / `>`).
+    SettingsCycle(i32),
+    /// Toggle the selected bool row (space).
+    SettingsToggle,
+    /// Write the edited config back to `config.toml` (`w`).
+    SettingsWrite,
+
     // ---- Overlays ------------------------------------------------------
     ToggleHelp,
 
@@ -108,6 +118,10 @@ pub enum Action {
     /// Periodic redraw. Drives the marquee and the clock. Note this means the
     /// app is never fully idle while ticker_scroll is on.
     Tick,
+    /// The poll timer fired. The consumer re-fetches quotes for the LIVE watchlist
+    /// (so `:add`ed symbols are included), rather than the poller capturing a fixed
+    /// list at startup.
+    PollTick,
     Quit,
 }
 

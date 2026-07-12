@@ -52,14 +52,9 @@ fn render_lines(state: &AppState) -> Vec<String> {
 
 /// Render a view at an arbitrary terminal size (for the responsive-layout tests).
 fn render_at(state: &AppState, w: u16, h: u16) -> Vec<String> {
-    // The Settings screen reads config; other views ignore it. A default config is
-    // enough here — Settings values (and the config path) are masked in that test.
-    let config = quotail::config::Config::default();
     let backend = TestBackend::new(w, h);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|f| quotail::ui::render(f, state, &config))
-        .unwrap();
+    terminal.draw(|f| quotail::ui::render(f, state)).unwrap();
     let buf = terminal.backend().buffer().clone();
     (0..h)
         .map(|y| {
@@ -181,6 +176,7 @@ fn base_state() -> AppState {
         sort_desc: true,
         selected_row: 0,
         scroll_offset: 0,
+        viewport_rows: 14,
         slots: [None, None, None, None],
         focused_slot: 0,
         timeframe: Timeframe::M1,
@@ -191,6 +187,8 @@ fn base_state() -> AppState {
         last_refresh: Utc.with_ymd_and_hms(2024, 1, 6, 22, 20, 1).unwrap(),
         status_msg: None,
         marquee_offset: 0,
+        config: quotail::config::Config::default(),
+        settings_row: 0,
         should_quit: false,
     }
 }
@@ -366,27 +364,28 @@ fn overview_chrome_matches_reference() {
 /// hint.
 fn detail_masks() -> Vec<(usize, usize, usize)> {
     let mut m = Vec::new();
-    // Main chart absorbs slack: title (row 0) + body (rows 1-16), interior 1-62.
-    // (Bottom border row 17 carries the ma legend + tf and is asserted.)
-    for r in 0..=16 {
-        m.push((r, 1, 63));
+    // Left column is now 56 wide (rail widened to 40); its border is col 55.
+    // Main chart: title (row 0) + body (rows 1-14), interior 1-54. (Bottom border
+    // row 15 carries the ma legend + tf and is asserted.)
+    for r in 0..=14 {
+        m.push((r, 1, 55));
     }
-    // Volume strip: title (row 18) + bars (rows 19-21). Bottom border row 22 asserted.
-    for r in 18..=21 {
-        m.push((r, 1, 63));
+    // Volume strip (4 body): title (row 16) + bars (rows 17-20). Bottom row 21.
+    for r in 16..=20 {
+        m.push((r, 1, 55));
     }
-    // RSI strip: title (row 23) + body (rows 24-27). Bottom border row 28 asserted.
-    for r in 23..=27 {
-        m.push((r, 1, 63));
+    // RSI strip (5 body): title (row 22) + body (rows 23-27). Bottom row 28.
+    for r in 22..=27 {
+        m.push((r, 1, 55));
     }
-    // Rail is top-aligned, so its label/value rows are unchanged. Values (right of
-    // the labels): fundamentals rows 2-7, indicators 16-18, session 21-24.
+    // Rail values are right-aligned to col 93 regardless of rail width. Fundamentals
+    // rows 2-7, indicators 16-18, session 21-24.
     for r in [2, 3, 4, 5, 6, 7, 16, 17, 18, 21, 22, 23, 24] {
         m.push((r, 81, 95));
     }
-    // Range bars span the whole rail interior.
-    m.push((10, 65, 95));
-    m.push((13, 65, 95));
+    // Range bars span the rail interior (rail starts at col 56, content at 58).
+    m.push((10, 57, 95));
+    m.push((13, 57, 95));
     m
 }
 
@@ -514,26 +513,27 @@ fn detail_main_chart_stretches_strips_stay_fixed() {
         row_has(&lines, 48, "NASDAQ"),
         "status must be the second-last row"
     );
-    // Vertical growth: the ma50/ma200 bottom border is at row 36 (was row 17).
+    // Vertical growth: the ma50/ma200 bottom border is at row 34 (main absorbs the
+    // slack; volume 6 tall + rsi 7 tall are fixed below it).
     assert!(
-        row_has(&lines, 36, "ma50"),
-        "main chart should stretch to row 36"
+        row_has(&lines, 34, "ma50"),
+        "main chart should stretch to row 34"
     );
     // Fixed strips keep their heights and sit just below the enlarged chart.
     assert!(
-        row_has(&lines, 37, "volume"),
-        "volume strip stays 5 rows tall"
+        row_has(&lines, 35, "volume"),
+        "volume strip (6 tall) starts at row 35"
     );
     assert!(
-        row_has(&lines, 42, "rsi (14)"),
-        "rsi strip stays 6 rows tall"
+        row_has(&lines, 41, "rsi (14)"),
+        "rsi strip (7 tall) starts at row 41"
     );
-    // Horizontal growth: the main column is now 88 wide (W - 32 rail), so its bottom
-    // border corner is col 87, and the fixed rail hugs the right edge (corner 119).
+    // Horizontal growth: the main column is now 80 wide (W - 40 rail), so its bottom
+    // border corner is col 79, and the fixed rail hugs the right edge (corner 119).
     assert_eq!(
-        char_at(&lines, 36, 87),
+        char_at(&lines, 34, 79),
         Some('┘'),
-        "main chart widens to col 87"
+        "main chart widens to col 79"
     );
     assert_eq!(
         char_at(&lines, 0, 119),
@@ -576,3 +576,4 @@ fn settings_is_top_aligned_with_bar_on_floor() {
         );
     }
 }
+

@@ -155,3 +155,101 @@ pub fn load() -> Result<Config> {
     let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
 }
+
+/// Persist the live watchlist back to `config.toml`, categorizing symbols by kind.
+/// Surgical (via `toml_edit`) so the user's comments and formatting survive. Called
+/// when `:add` / `:rm` change the list — those are user intent, not session state.
+pub fn persist_watchlist(symbols: &[String]) -> Result<()> {
+    let path = path()?;
+    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let mut doc = text
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("parsing {}", path.display()))?;
+    apply_watchlist(&mut doc, symbols);
+    fs::write(&path, doc.to_string()).with_context(|| format!("writing {}", path.display()))
+}
+
+/// Write the whole editable config back to `config.toml` (settings `w` + the live
+/// watchlist), preserving comments/formatting via `toml_edit`.
+pub fn save(config: &Config, watchlist: &[String]) -> Result<()> {
+    let path = path()?;
+    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let mut doc = text
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("parsing {}", path.display()))?;
+    use toml_edit::{table, value};
+
+    apply_watchlist(&mut doc, watchlist);
+
+    let d = doc["display"].or_insert(table());
+    d["theme"] = value(config.display.theme.as_str());
+    d["default_timeframe"] = value(config.display.default_timeframe.as_str());
+    d["default_filter"] = value(config.display.default_filter.as_str());
+    d["default_sort"] = value(config.display.default_sort.as_str());
+    d["ticker_scroll"] = value(config.display.ticker_scroll);
+    d["ticker_speed_ms"] = value(config.display.ticker_speed_ms as i64);
+
+    let dt = doc["data"].or_insert(table());
+    dt["provider"] = value(config.data.provider.as_str());
+    dt["poll_interval_sec"] = value(config.data.poll_interval_sec as i64);
+    dt["cache_ttl_sec"] = value(config.data.cache_ttl_sec as i64);
+
+    let m = doc["mcp"].or_insert(table());
+    m["enabled"] = value(config.mcp.enabled);
+    m["socket_path"] = value(config.mcp.socket_path.as_str());
+
+    fs::write(&path, doc.to_string()).with_context(|| format!("writing {}", path.display()))
+}
+
+/// Pure core of `persist_watchlist`: rewrite the three watchlist arrays in-place,
+/// categorizing each symbol by kind. Editing the existing doc (not reserializing)
+/// keeps every comment and blank line the user has.
+fn apply_watchlist(doc: &mut toml_edit::DocumentMut, symbols: &[String]) {
+    use crate::data::types::AssetKind;
+
+    let mut stocks = toml_edit::Array::new();
+    let mut crypto = toml_edit::Array::new();
+    let mut indices = toml_edit::Array::new();
+    for s in symbols {
+        match AssetKind::infer(s) {
+            AssetKind::Stock => stocks.push(s.as_str()),
+            AssetKind::Crypto => crypto.push(s.as_str()),
+            AssetKind::Index => indices.push(s.as_str()),
+        }
+    }
+    let wl = doc["watchlist"].or_insert(toml_edit::table());
+    wl["stocks"] = toml_edit::value(stocks);
+    wl["crypto"] = toml_edit::value(crypto);
+    wl["indices"] = toml_edit::value(indices);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persist_updates_arrays_and_keeps_comments() {
+        let mut doc = DEFAULT_CONFIG_TOML
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap();
+        apply_watchlist(
+            &mut doc,
+            &[
+                "AAPL".into(),
+                "TSLA".into(),
+                "BTC-USD".into(),
+                "^GSPC".into(),
+            ],
+        );
+        let out = doc.to_string();
+        // Arrays reflect the new list, split by kind.
+        let cfg: Config = toml::from_str(&out).unwrap();
+        assert_eq!(cfg.watchlist.stocks, vec!["AAPL", "TSLA"]);
+        assert_eq!(cfg.watchlist.crypto, vec!["BTC-USD"]);
+        assert_eq!(cfg.watchlist.indices, vec!["^GSPC"]);
+        // Comments and other sections survive the surgical edit.
+        assert!(out.contains("# Quotail — default configuration."));
+        assert!(out.contains("[mcp]"));
+        assert!(out.contains("poll_interval_sec"));
+    }
+}

@@ -2,10 +2,11 @@
 //! the left, a fundamentals rail on the right.
 //!
 //! Fully RESPONSIVE. The bar is always the last two rows and the rail is a FIXED
-//! 32 cols on the right; the left column takes the rest (`W - 32`). Vertically,
-//! volume (5) and rsi (6) are FIXED-HEIGHT strips and the MAIN CHART absorbs the
-//! slack in both axes — a wider chart just shows more candle columns over the same
-//! span. At 96x31: main 64 wide, rows 0-17 (16 body); volume 18-22; rsi 23-28;
+//! 40 cols on the right; the left column takes the rest (`W - 40`). Vertically,
+//! volume (4 body) and rsi (5 body) are FIXED-HEIGHT strips and the MAIN CHART
+//! absorbs the slack in both axes — a wider chart just shows more candle columns
+//! over the same span, and the right gutter carries the price/volume/rsi axis
+//! labels. At 96x31: main 56 wide, rows 0-15 (14 body); volume 16-21; rsi 22-28;
 //! rail 0-28; bar 29-30.
 
 use ratatui::Frame;
@@ -93,26 +94,24 @@ fn render_main_chart(
     area: Rect,
 ) {
     let border = Style::default().fg(theme.border);
+    let warn = Style::default().fg(theme.warn);
+    let heading = Style::default().fg(theme.heading);
     let title = detail.map(main_title).unwrap_or_default();
-    super::draw_box(buf, area, &title, border);
+    super::draw_box(buf, area, &title, border, heading);
 
-    // Replace the plain bottom border with the ma50/ma200 legend + timeframe.
-    let bottom = main_bottom_border(state.timeframe.label(), area.width);
+    // Replace the plain bottom border with the ma50/ma200 legend + timeframe, then
+    // repaint the legend so its colors MATCH the overlay dots they describe (ma50
+    // warn, ma200 heading) and the timeframe label in accent.
+    let tf = state.timeframe.label();
+    let bottom = main_bottom_border(tf, area.width);
     let by = area.y + area.height - 1;
     buf.set_string(area.x, by, bottom, border);
-    // Legend dots keep their MA colors (ma50 warn, ma200 heading).
-    buf.set_string(
-        area.x + 9,
-        by,
-        glyph::MA_DOT.to_string(),
-        Style::default().fg(theme.warn),
-    );
-    buf.set_string(
-        area.x + 19,
-        by,
-        glyph::MA_DOT.to_string(),
-        Style::default().fg(theme.heading),
-    );
+    buf.set_string(area.x + 4, by, "ma50", warn);
+    buf.set_string(area.x + 9, by, glyph::MA_DOT.to_string(), warn);
+    buf.set_string(area.x + 13, by, "ma200", heading);
+    buf.set_string(area.x + 19, by, glyph::MA_DOT.to_string(), heading);
+    let tf_col = area.x + area.width.saturating_sub(9 + tf.chars().count() as u16);
+    buf.set_string(tf_col, by, tf, Style::default().fg(theme.accent));
 
     if let Some(d) = detail {
         // Candles inset one padding column; the right gutter carries price labels.
@@ -125,7 +124,30 @@ fn render_main_chart(
         };
         let cols = chart::aggregate(&d.candles, &d.indicators, state.timeframe.display_span(), n);
         chart::render_candles(buf, interior, &cols);
+        // Price axis in the right gutter (high at top, mid in the middle, low at the
+        // bottom) — this is what fills the space right of the candles.
+        if let Some((lo, hi)) = chart::price_range(&cols) {
+            let muted = Style::default().fg(theme.muted);
+            let end = area.x + area.width - 3;
+            let top = area.y + 1;
+            let bot = area.y + area.height - 2;
+            axis_right(buf, end, top, &format!("{hi:.2}"), muted);
+            axis_right(
+                buf,
+                end,
+                (top + bot) / 2,
+                &format!("{:.2}", (hi + lo) / 2.0),
+                muted,
+            );
+            axis_right(buf, end, bot, &format!("{lo:.2}"), muted);
+        }
     }
+}
+
+/// Right-align `text` so it ends at column `end_x`.
+fn axis_right(buf: &mut Buffer, end_x: u16, y: u16, text: &str, style: Style) {
+    let start = end_x.saturating_sub(text.chars().count() as u16 - 1);
+    buf.set_string(start, y, text, style);
 }
 
 /// `AAPL · Apple Inc. · $326.77  +1.23 (+0.38%)`.
@@ -163,8 +185,27 @@ fn render_volume(
     theme: Theme,
     area: Rect,
 ) {
-    let title = detail.map(volume_title).unwrap_or_else(|| "volume".into());
-    super::draw_box(buf, area, &title, Style::default().fg(theme.border));
+    // Title: "volume" in heading, the M/B numbers in cyan.
+    let border = Style::default().fg(theme.border);
+    let heading = Style::default().fg(theme.heading);
+    let price = Style::default().fg(theme.price);
+    match detail.and_then(|d| d.quote.as_ref()) {
+        Some(q) => {
+            let (vol, avg) = (fmt_vol(q.volume), fmt_vol(q.avg_volume));
+            super::draw_box_titled(
+                buf,
+                area,
+                border,
+                &[
+                    ("volume  ", heading),
+                    (&vol, price),
+                    (" · avg ", heading),
+                    (&avg, price),
+                ],
+            );
+        }
+        None => super::draw_box_titled(buf, area, border, &[("volume", heading)]),
+    }
 
     if let Some(d) = detail {
         let interior = Rect {
@@ -180,17 +221,18 @@ fn render_volume(
             candle_cols(area.width),
         );
         render_volume_bars(buf, interior, &cols, theme);
-    }
-}
-
-fn volume_title(d: &DetailState) -> String {
-    match d.quote.as_ref() {
-        Some(q) => format!(
-            "volume  {} · avg {}",
-            fmt_vol(q.volume),
-            fmt_vol(q.avg_volume)
-        ),
-        None => "volume".into(),
+        // Axis gutter: peak volume at the top, 0 at the bottom.
+        let peak = cols
+            .iter()
+            .flatten()
+            .map(|c| c.volume)
+            .fold(0.0_f64, f64::max);
+        if peak > 0.0 {
+            let muted = Style::default().fg(theme.muted);
+            let end = area.x + area.width - 3;
+            axis_right(buf, end, area.y + 1, &fmt_vol(Some(peak)), muted);
+            axis_right(buf, end, area.y + area.height - 2, "0", muted);
+        }
     }
 }
 
@@ -237,8 +279,17 @@ fn render_rsi(
     theme: Theme,
     area: Rect,
 ) {
-    let title = detail.map(rsi_title).unwrap_or_else(|| "rsi (14)".into());
-    super::draw_box(buf, area, &title, Style::default().fg(theme.border));
+    // Title: "rsi (14)" in heading, the current value in cyan.
+    let border = Style::default().fg(theme.border);
+    let heading = Style::default().fg(theme.heading);
+    let price = Style::default().fg(theme.price);
+    match detail.and_then(|d| last(&d.indicators.rsi)) {
+        Some(v) => {
+            let val = format!("{v:.1}");
+            super::draw_box_titled(buf, area, border, &[("rsi (14)  ", heading), (&val, price)]);
+        }
+        None => super::draw_box_titled(buf, area, border, &[("rsi (14)", heading)]),
+    }
 
     if let Some(d) = detail {
         let interior = Rect {
@@ -254,13 +305,11 @@ fn render_rsi(
             candle_cols(area.width),
         );
         render_rsi_line(buf, interior, &cols, theme);
-    }
-}
-
-fn rsi_title(d: &DetailState) -> String {
-    match last(&d.indicators.rsi) {
-        Some(v) => format!("rsi (14)  {v:.1}"),
-        None => "rsi (14)".into(),
+        // Axis gutter: the 70 / 30 band levels align with the top / bottom rows.
+        let muted = Style::default().fg(theme.muted);
+        let end = area.x + area.width - 3;
+        axis_right(buf, end, area.y + 1, "70", muted);
+        axis_right(buf, end, area.y + area.height - 2, "30", muted);
     }
 }
 
@@ -304,88 +353,129 @@ fn render_rsi_line(buf: &mut Buffer, area: Rect, columns: &[Option<chart::Column
 // ---- fundamentals rail -----------------------------------------------------
 
 fn render_rail(buf: &mut Buffer, detail: Option<&DetailState>, theme: Theme, area: Rect) {
+    let border = Style::default().fg(theme.border);
+    let heading = Style::default().fg(theme.heading);
+    let muted = Style::default().fg(theme.muted); // labels
+    let fg = Style::default().fg(theme.fg); // ordinary values
+    let price = Style::default().fg(theme.price); // market cap
     // The rail spans the full panel height; its content stays top-aligned (rows are
     // measured from the top border, and the rail is always anchored at y=0).
-    super::draw_box(buf, area, "fundamentals", Style::default().fg(theme.border));
+    super::draw_box(buf, area, "fundamentals", border, heading);
 
-    let label = Style::default().fg(theme.fg);
-    let head = Style::default().fg(theme.heading);
-    let value = Style::default().fg(theme.fg);
     let lx = area.x + 2; // label column
     let vend = area.x + DETAIL_RAIL_WIDTH - 3; // value right edge
 
-    let mut put_label = |row: u16, text: &str, style: Style| {
-        buf.set_string(lx, row, text, style);
-    };
-
-    // Static structure — labels and section headers are the contract; the values
-    // (right-aligned) come from the quote / fundamentals / indicators when present.
-    put_label(2, "market cap", label);
-    put_label(3, "p/e (ttm)", label);
-    put_label(4, "p/e (fwd)", label);
-    put_label(5, "eps (ttm)", label);
-    put_label(6, "div yield", label);
-    put_label(7, "beta", label);
-    put_label(9, "day range", head);
-    put_label(12, "52-wk range", head);
-    put_label(15, "indicators", head);
-    put_label(16, "ma50", label);
-    put_label(17, "ma200", label);
-    put_label(18, "rsi (14)", label);
-    put_label(20, "session", head);
-    put_label(21, "open", label);
-    put_label(22, "prev close", label);
-    put_label(23, "day high", label);
-    put_label(24, "day low", label);
+    // Row labels in muted, section headers in heading purple.
+    for (row, text) in [
+        (2, "market cap"),
+        (3, "p/e (ttm)"),
+        (4, "p/e (fwd)"),
+        (5, "eps (ttm)"),
+        (6, "div yield"),
+        (7, "beta"),
+        (16, "ma50"),
+        (17, "ma200"),
+        (18, "rsi (14)"),
+        (21, "open"),
+        (22, "prev close"),
+        (23, "day high"),
+        (24, "day low"),
+    ] {
+        buf.set_string(lx, row, text, muted);
+    }
+    for (row, text) in [
+        (9, "day range"),
+        (12, "52-wk range"),
+        (15, "indicators"),
+        (20, "session"),
+    ] {
+        buf.set_string(lx, row, text, heading);
+    }
 
     let Some(d) = detail else { return };
-    let f = d.fundamentals.as_ref();
 
-    let mut put_value = |row: u16, text: String| {
-        let start = vend.saturating_sub(text.chars().count() as u16 - 1);
-        buf.set_string(start, row, text, value);
-    };
-
-    if let Some(f) = f {
+    if let Some(f) = d.fundamentals.as_ref() {
         if let Some(v) = f.market_cap {
-            put_value(2, fmt_cap(v));
+            rail_value(buf, vend, 2, &fmt_cap(v), price); // market cap = cyan
         }
         if let Some(v) = f.pe_trailing {
-            put_value(3, format!("{v:.1}"));
+            rail_value(buf, vend, 3, &format!("{v:.1}"), fg);
         }
         if let Some(v) = f.pe_forward {
-            put_value(4, format!("{v:.1}"));
+            rail_value(buf, vend, 4, &format!("{v:.1}"), fg);
         }
         if let Some(v) = f.eps_trailing {
-            put_value(5, format!("{v:.2}"));
+            rail_value(buf, vend, 5, &format!("{v:.2}"), fg);
         }
         if let Some(v) = f.div_yield {
-            put_value(6, format!("{v:.2}%"));
+            rail_value(buf, vend, 6, &format!("{v:.2}%"), fg);
         }
         if let Some(v) = f.beta {
-            put_value(7, format!("{v:.2}"));
+            rail_value(buf, vend, 7, &format!("{v:.2}"), fg);
         }
     }
+    // ma50 in warn, ma200 in heading (matching the overlay dots), each with a
+    // trend arrow (▲ price above the MA, ▼ below).
+    let price_now = d.quote.as_ref().map(|q| q.price);
     if let Some(v) = last(&d.indicators.ma50) {
-        put_value(16, format!("{v:.2}"));
+        rail_ma(
+            buf,
+            vend,
+            16,
+            v,
+            price_now,
+            Style::default().fg(theme.warn),
+            theme,
+        );
     }
     if let Some(v) = last(&d.indicators.ma200) {
-        put_value(17, format!("{v:.2}"));
+        rail_ma(buf, vend, 17, v, price_now, heading, theme);
     }
     if let Some(v) = last(&d.indicators.rsi) {
-        put_value(18, format!("{v:.1}"));
+        rail_value(buf, vend, 18, &format!("{v:.1}"), fg);
     }
 
     if let Some(q) = d.quote.as_ref() {
         if let Some(o) = q.open {
-            put_value(21, format!("{o:.2}"));
+            rail_value(buf, vend, 21, &format!("{o:.2}"), fg);
         }
-        put_value(22, format!("{:.2}", q.prev_close));
-        put_value(23, format!("{:.2}", q.day_range.1));
-        put_value(24, format!("{:.2}", q.day_range.0));
+        rail_value(buf, vend, 22, &format!("{:.2}", q.prev_close), fg);
+        rail_value(buf, vend, 23, &format!("{:.2}", q.day_range.1), fg);
+        rail_value(buf, vend, 24, &format!("{:.2}", q.day_range.0), fg);
         // Range bars (row 10 day, row 13 52-wk) — masked in the snapshot.
         render_range_bar(buf, 10, area, q.day_range, q.price, theme);
         render_range_bar(buf, 13, area, q.week52_range, q.price, theme);
+    }
+}
+
+/// Right-align `text` ending at `vend` on `row`.
+fn rail_value(buf: &mut Buffer, vend: u16, row: u16, text: &str, style: Style) {
+    let start = vend.saturating_sub(text.chars().count() as u16 - 1);
+    buf.set_string(start, row, text, style);
+}
+
+/// A MA row: value ending two cells before `vend`, then a ▲/▼ trend arrow at `vend`
+/// colored up/down.
+fn rail_ma(
+    buf: &mut Buffer,
+    vend: u16,
+    row: u16,
+    ma: f64,
+    price: Option<f64>,
+    val: Style,
+    theme: Theme,
+) {
+    let text = format!("{ma:.2}");
+    let end = vend.saturating_sub(2);
+    let start = end.saturating_sub(text.chars().count() as u16 - 1);
+    buf.set_string(start, row, &text, val);
+    if let Some(p) = price {
+        let (arrow, color) = if p >= ma {
+            (glyph::UP_ARROW, theme.up)
+        } else {
+            (glyph::DOWN_ARROW, theme.down)
+        };
+        buf.set_string(vend, row, arrow.to_string(), Style::default().fg(color));
     }
 }
 
@@ -418,7 +508,7 @@ fn render_range_bar(
             track_start + x,
             row,
             glyph::RSI_BAND.to_string(),
-            Style::default().fg(theme.muted),
+            Style::default().fg(theme.border), // bar line = border
         );
     }
     let t = if hi > lo {

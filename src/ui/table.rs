@@ -15,9 +15,18 @@ use crate::data::types::AssetKind;
 
 use super::theme::{Theme, glyph};
 
-/// Rows visible in the table body at once (the panel shows 14; ~68 symbols
-/// scroll past it).
+/// Fallback body-row count before the first terminal size is known (headless /
+/// initial state). The real count is derived from the panel height via
+/// [`visible_rows`] — the watchlist box stretches with the terminal.
 pub const TABLE_VISIBLE_ROWS: usize = 14;
+
+/// Data rows the table body can show at a given panel height: the panel minus its
+/// title row, header row, and bottom border. The watchlist box stretches to fill
+/// the terminal, so a taller terminal shows MORE symbols — this is derived, never
+/// a fixed cap. (At the 96x31 reference the box is 26 tall → 23 rows.)
+pub fn visible_rows(panel_height: u16) -> usize {
+    (panel_height as usize).saturating_sub(3).max(1)
+}
 
 /// Does an asset kind pass the current filter?
 pub fn asset_matches(filter: AssetFilter, kind: AssetKind) -> bool {
@@ -93,87 +102,108 @@ const SCROLL_COL: u16 = 38;
 
 pub fn render(buf: &mut Buffer, area: Rect, state: &AppState) {
     let theme = Theme::TOKYONIGHT;
-    let border = if state.focus == FocusRegion::Table {
+    // Focus dims the BORDER only; the title/content keep their own colors.
+    let border = Style::default().fg(if state.focus == FocusRegion::Table {
         theme.border_focus
     } else {
         theme.border
-    };
-    let title = format!("watchlist ─ {}", filter_title(state.filter));
-    super::draw_box(buf, area, &title, Style::default().fg(border));
-
-    let x = area.x;
+    });
     let heading = Style::default().fg(theme.heading);
+    let muted = Style::default().fg(theme.muted);
+    let accent = Style::default().fg(theme.accent);
+
+    // Plain frame, then paint the title with per-segment colors: "watchlist" in
+    // heading purple, the active filter tab in accent orange, the rest muted.
+    super::draw_box(buf, area, "", border, border);
+    let x = area.x;
+    let y = area.y;
+    let mut cx = x;
+    let mut put = |cx: &mut u16, text: &str, st: Style| {
+        buf.set_string(*cx, y, text, st);
+        *cx += text.chars().count() as u16;
+    };
+    put(&mut cx, "┌─ ", border);
+    put(&mut cx, "watchlist", heading);
+    put(&mut cx, " ─ ", border);
+    for (f, label) in [
+        (AssetFilter::All, "All"),
+        (AssetFilter::Stocks, "Stk"),
+        (AssetFilter::Crypto, "Cry"),
+        (AssetFilter::Indices, "Idx"),
+    ] {
+        if f == state.filter {
+            put(&mut cx, &format!("[{label}]"), accent);
+        } else {
+            put(&mut cx, label, muted);
+        }
+        put(&mut cx, " ", border);
+    }
+
+    // Column headers + sort arrow, all in heading purple.
     let hy = area.y + 1;
     buf.set_string(x + 2, hy, "ticker", heading);
     put_right(buf, x + PRICE_END, hy, "price", heading);
     put_right(buf, x + CHG_END, hy, "chg%", heading);
-    // Sort arrow next to the active column (fixture sorts by change_pct).
     if state.sort == SortKey::ChangePct {
         let arrow = if state.sort_desc {
             glyph::SORT_DESC
         } else {
             glyph::SORT_ASC
         };
-        buf.set_string(
-            x + SORT_COL,
-            hy,
-            arrow.to_string(),
-            Style::default().fg(theme.accent),
-        );
+        buf.set_string(x + SORT_COL, hy, arrow.to_string(), heading);
     }
 
-    // Data rows: the visible slice of the filtered/sorted list.
+    // Data rows: symbol fg, price cyan, chg green/red; selected row gets the
+    // selection background layered under all three columns.
+    let visible = visible_rows(area.height);
     let rows = visible_symbols(state);
     for (i, sym) in rows
         .iter()
         .enumerate()
         .skip(state.scroll_offset)
-        .take(TABLE_VISIBLE_ROWS)
+        .take(visible)
     {
         let ry = area.y + 2 + (i - state.scroll_offset) as u16;
-        let selected = i == state.selected_row;
-        let row_style = if selected {
-            Style::default().fg(theme.fg).bg(theme.selection)
-        } else {
-            Style::default().fg(theme.fg)
+        let bg = |st: Style| {
+            if i == state.selected_row {
+                st.bg(theme.selection)
+            } else {
+                st
+            }
         };
-        buf.set_string(x + 2, ry, sym, row_style);
+        buf.set_string(x + 2, ry, sym, bg(Style::default().fg(theme.fg)));
         if let Some(q) = state.quotes.get(sym) {
             put_right(
                 buf,
                 x + PRICE_END,
                 ry,
                 &format!("{:.2}", q.price),
-                row_style,
+                bg(Style::default().fg(theme.price)),
             );
-            let chg_style = if selected {
-                row_style
-            } else {
-                Style::default().fg(theme.change(q.change_pct))
-            };
             put_right(
                 buf,
                 x + CHG_END,
                 ry,
                 &format!("{:+.2}%", q.change_pct),
-                chg_style,
+                bg(Style::default().fg(theme.change(q.change_pct))),
             );
         }
     }
 
-    render_scrollbar(buf, area, rows.len(), state.scroll_offset);
+    render_scrollbar(buf, area, rows.len(), state.scroll_offset, visible);
 }
 
-/// A right-anchored thumb on the panel's right-inner column (col 38).
-fn render_scrollbar(buf: &mut Buffer, area: Rect, total: usize, offset: usize) {
+/// A right-anchored thumb on the panel's right-inner column (col 38). `visible` is
+/// the body-row count for the current panel height.
+fn render_scrollbar(buf: &mut Buffer, area: Rect, total: usize, offset: usize, visible: usize) {
     let theme = Theme::TOKYONIGHT;
-    if total <= TABLE_VISIBLE_ROWS {
+    if total <= visible {
         return;
     }
-    let track_h = TABLE_VISIBLE_ROWS as u16;
+    let track_h = visible as u16;
     let top = area.y + 2;
-    let thumb_h = ((track_h as usize * TABLE_VISIBLE_ROWS) / total).max(1) as u16;
-    let max_off = total - TABLE_VISIBLE_ROWS;
+    let thumb_h = ((track_h as usize * visible) / total).max(1) as u16;
+    let max_off = total - visible;
     let thumb_y = (offset * (track_h - thumb_h) as usize)
         .checked_div(max_off)
         .unwrap_or(0) as u16;
@@ -197,22 +227,4 @@ fn put_right(buf: &mut Buffer, end_col: u16, y: u16, text: &str, style: Style) {
     let len = text.chars().count() as u16;
     let x = end_col.saturating_sub(len.saturating_sub(1));
     buf.set_string(x, y, text, style);
-}
-
-/// The filter segment of the panel title, with the active one bracketed.
-fn filter_title(filter: AssetFilter) -> String {
-    let seg = |f: AssetFilter, label: &str| {
-        if f == filter {
-            format!("[{label}]")
-        } else {
-            label.to_string()
-        }
-    };
-    format!(
-        "{} {} {} {}",
-        seg(AssetFilter::All, "All"),
-        seg(AssetFilter::Stocks, "Stk"),
-        seg(AssetFilter::Crypto, "Cry"),
-        seg(AssetFilter::Indices, "Idx"),
-    )
 }

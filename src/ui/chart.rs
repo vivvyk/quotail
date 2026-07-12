@@ -120,28 +120,58 @@ fn sample(series: &[Option<f64>], i: usize) -> Option<f64> {
 // carrying the timeframe label. Both dimensions come from `area` — panes stretch
 // with the terminal, so the interior width/height are derived, never constants.
 
-/// A filled grid pane. `border_style` colors the frame so callers can highlight
-/// focus. Candle interior is masked in the overview snapshot; its exact glyphs are
-/// pinned by the `render*_candle*` unit tests below.
+/// A filled grid pane. `border_style` colors the FRAME (focus dims the border, not
+/// the title). The title is painted per-segment: symbol fg, price cyan, change
+/// green/red; the timeframe on the bottom border is warn. Candle interior is masked
+/// in the overview snapshot; its glyphs are pinned by the unit tests below.
+#[allow(clippy::too_many_arguments)] // a pane genuinely has this many inputs
 pub fn render_grid_pane(
     buf: &mut Buffer,
     area: Rect,
-    title: &str,
+    symbol: &str,
+    price: Option<&str>,
+    change_pct: Option<f64>,
     columns: &[Option<Column>],
     tf_label: &str,
     border_style: Style,
 ) {
-    super::draw_box(buf, area, title, border_style);
-    // Replace the plain bottom border with one carrying the timeframe, e.g.
-    // `└────────── 1M ────────────┘`.
+    let theme = Theme::TOKYONIGHT;
+    super::draw_box(buf, area, "", border_style, border_style);
+
+    // Title spans over the top border: `┌─ SYM price +chg% ` then the pre-drawn dashes.
+    let y = area.y;
+    let mut cx = area.x;
+    let mut put = |cx: &mut u16, text: &str, st: Style| {
+        buf.set_string(*cx, y, text, st);
+        *cx += text.chars().count() as u16;
+    };
+    put(&mut cx, "┌─ ", border_style);
+    put(&mut cx, symbol, Style::default().fg(theme.fg));
+    if let (Some(p), Some(chg)) = (price, change_pct) {
+        put(&mut cx, " ", border_style);
+        put(&mut cx, p, Style::default().fg(theme.price));
+        put(&mut cx, " ", border_style);
+        put(
+            &mut cx,
+            &format!("{chg:+.2}%"),
+            Style::default().fg(theme.change(chg)),
+        );
+    }
+    put(&mut cx, " ", border_style);
+
+    // Bottom border carrying the timeframe; then repaint just the tf label in warn.
+    let by = area.y + area.height - 1;
     buf.set_string(
         area.x,
-        area.y + area.height - 1,
+        by,
         tf_bottom_border(area.width as usize, tf_label),
         border_style,
     );
-    // Interior derives from the actual pane size (panes stretch vertically to fill
-    // the terminal), inset one padding column each side and one border row each end.
+    let label_col = area.x + tf_label_col(area.width as usize, tf_label);
+    buf.set_string(label_col, by, tf_label, Style::default().fg(theme.warn));
+
+    // Interior derives from the actual pane size (panes stretch to fill the
+    // terminal), inset one padding column each side and one border row each end.
     let interior = Rect {
         x: area.x + 2,
         y: area.y + 1,
@@ -154,7 +184,7 @@ pub fn render_grid_pane(
 /// An empty pane: plain box with a centered `enter to chart` prompt.
 pub fn render_empty_pane(buf: &mut Buffer, area: Rect, border_style: Style) {
     let theme = Theme::TOKYONIGHT;
-    super::draw_box(buf, area, "", border_style);
+    super::draw_box(buf, area, "", border_style, border_style);
     let text = "enter to chart";
     let x = area.x + (area.width - text.len() as u16) / 2;
     let y = area.y + area.height / 2;
@@ -172,18 +202,20 @@ fn tf_bottom_border(width: usize, label: &str) -> String {
     format!("└{}{seg}{}┘", "─".repeat(left), "─".repeat(right))
 }
 
-/// Draw candle columns into `area` (already the interior — no borders). Each
-/// column is one cell wide. Body `█`, wick `│`; MA dots `·` are drawn ONLY into
-/// still-empty cells — a candle always wins. Up/down color by close vs open;
-/// ma50 in `warn`, ma200 in `heading` (per the theme). Shared by the grid panes
-/// and the larger Detail chart.
-pub(crate) fn render_candles(buf: &mut Buffer, area: Rect, columns: &[Option<Column>]) {
-    let theme = Theme::TOKYONIGHT;
-    if area.height == 0 || columns.iter().all(|c| c.is_none()) {
-        return;
-    }
-    // Scale spans every visible high/low AND any MA point, so an MA line can never
-    // fall outside the pane.
+/// Column (relative to the pane's left edge) where the timeframe LABEL text begins
+/// on the bottom border — matches `tf_bottom_border`'s layout (`└` + left dashes +
+/// ` label `). Used to repaint just the label in a highlight color.
+fn tf_label_col(width: usize, label: &str) -> u16 {
+    let seg_len = label.chars().count() + 2; // ` label `
+    let inner = width.saturating_sub(2);
+    let left = inner.saturating_sub(seg_len).saturating_sub(1) / 2;
+    (1 + left + 1) as u16 // └ + left dashes + leading space
+}
+
+/// The price range the chart scales onto rows: min low / max high across visible
+/// columns, widened to include any MA point so an MA line can't fall off-pane.
+/// `None` for an empty or flat series. Shared by the candle renderer and the axis.
+pub(crate) fn price_range(columns: &[Option<Column>]) -> Option<(f64, f64)> {
     let mut lo = f64::MAX;
     let mut hi = f64::MIN;
     for c in columns.iter().flatten() {
@@ -194,8 +226,21 @@ pub(crate) fn render_candles(buf: &mut Buffer, area: Rect, columns: &[Option<Col
             lo = lo.min(v);
         }
     }
-    if hi <= lo {
-        return; // flat series — nothing to scale onto rows
+    (hi > lo).then_some((lo, hi))
+}
+
+/// Draw candle columns into `area` (already the interior — no borders). Each
+/// column is one cell wide. Body `█`, wick `│`; MA dots `·` are drawn ONLY into
+/// still-empty cells — a candle always wins. Up/down color by close vs open;
+/// ma50 in `warn`, ma200 in `heading` (per the theme). Shared by the grid panes
+/// and the larger Detail chart.
+pub(crate) fn render_candles(buf: &mut Buffer, area: Rect, columns: &[Option<Column>]) {
+    let theme = Theme::TOKYONIGHT;
+    let Some((lo, hi)) = price_range(columns) else {
+        return;
+    };
+    if area.height == 0 {
+        return;
     }
     let h = area.height;
     let row_of = |p: f64| -> u16 {

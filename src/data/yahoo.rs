@@ -303,11 +303,18 @@ struct RawQuote {
     average_daily_volume3_month: Option<f64>,
     market_cap: Option<f64>,
     full_exchange_name: Option<String>,
+    // Yahoo spells these with an uppercase "PE", which `rename_all = "camelCase"`
+    // would mangle to `trailingPe`/`forwardPe` — so pin the exact wire names.
+    #[serde(rename = "trailingPE")]
     trailing_pe: Option<f64>,
+    #[serde(rename = "forwardPE")]
     forward_pe: Option<f64>,
     eps_trailing_twelve_months: Option<f64>,
     dividend_yield: Option<f64>,
     trailing_annual_dividend_yield: Option<f64>,
+    // NOTE: `beta` is NOT returned by the v7 /finance/quote endpoint. It lives in
+    // v10 /quoteSummary (defaultKeyStatistics). Left here (always None) until that
+    // second fetch is wired; the rail shows a blank until then.
     beta: Option<f64>,
     market_state: Option<String>,
 }

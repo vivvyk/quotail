@@ -5,7 +5,7 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 
 use crate::app::{AppState, InputMode, View};
 use crate::data::types::MarketStatus;
@@ -17,16 +17,18 @@ pub fn render(buf: &mut Buffer, area: Rect, state: &AppState) {
     let muted = Style::default().fg(theme.muted);
     let (x, y) = (area.x, area.y);
 
-    // ---- status row ----
-    let exchange = exchange_label(state);
+    // ---- status row: exchange (muted) + status WORD (green/red) ----
+    let exchange = format!("{}: ", exchange_label(state));
+    buf.set_string(x + 1, y, &exchange, muted);
+    let word = status_text(state.market_status);
     buf.set_string(
-        x + 1,
+        x + 1 + exchange.chars().count() as u16,
         y,
-        format!("{exchange}: {}", status_text(state.market_status)),
-        muted,
+        word,
+        Style::default().fg(status_color(state.market_status, theme)),
     );
     // The `(Opens …)` next-open hint is deferred (needs a market calendar); the
-    // snapshot masks that span. `[tf]` shows only on the chart views.
+    // snapshot masks that span. `[tf]` (warn/yellow) shows only on the chart views.
     if matches!(state.view, View::Overview | View::Detail) {
         buf.set_string(
             x + 51,
@@ -44,8 +46,16 @@ pub fn render(buf: &mut Buffer, area: Rect, state: &AppState) {
     // ---- hint / input row ----
     let y2 = y + 1;
     match state.input_mode {
+        // Keys in accent, their labels in muted.
         InputMode::Normal => {
-            buf.set_string(x + 1, y2, hints(state.view), muted);
+            let accent = Style::default().fg(theme.accent);
+            let mut cx = x + 1;
+            for (key, label) in hints(state.view) {
+                buf.set_string(cx, y2, key, accent);
+                cx += key.chars().count() as u16 + 1;
+                buf.set_string(cx, y2, label, muted);
+                cx += label.chars().count() as u16 + 2;
+            }
         }
         InputMode::Command => {
             buf.set_string(
@@ -89,16 +99,50 @@ fn status_text(status: MarketStatus) -> &'static str {
     }
 }
 
-fn hints(view: View) -> &'static str {
+fn status_color(status: MarketStatus, theme: Theme) -> Color {
+    match status {
+        MarketStatus::Open => theme.up,
+        MarketStatus::Closed => theme.down,
+        // Pre/after-hours: open-ish but not regular session.
+        MarketStatus::PreMarket | MarketStatus::AfterHours => theme.warn,
+    }
+}
+
+/// Per-view keyhints as (key, label) pairs — the key is drawn in accent, the label
+/// in muted. Concatenated they reproduce the reference hint strings exactly.
+fn hints(view: View) -> &'static [(&'static str, &'static str)] {
     match view {
-        View::Overview => {
-            "q quit  d detail  / search  f filter  s sort  c clear  tab pane  r refresh  : cmd  ? help"
-        }
-        View::Detail => {
-            "esc back  / search  1-7 timeframe  e export  r refresh  : cmd  ? help  q quit"
-        }
-        View::Settings => {
-            "j/k move  enter edit  < > change  space toggle  w write  esc back  ? help  q quit"
-        }
+        View::Overview => &[
+            ("q", "quit"),
+            ("d", "detail"),
+            ("/", "search"),
+            ("f", "filter"),
+            ("s", "sort"),
+            ("c", "clear"),
+            ("tab", "pane"),
+            ("r", "refresh"),
+            (":", "cmd"),
+            ("?", "help"),
+        ],
+        View::Detail => &[
+            ("esc", "back"),
+            ("/", "search"),
+            ("1-7", "timeframe"),
+            ("e", "export"),
+            ("r", "refresh"),
+            (":", "cmd"),
+            ("?", "help"),
+            ("q", "quit"),
+        ],
+        View::Settings => &[
+            ("j/k", "move"),
+            ("enter", "edit"),
+            ("< >", "change"),
+            ("space", "toggle"),
+            ("w", "write"),
+            ("esc", "back"),
+            ("?", "help"),
+            ("q", "quit"),
+        ],
     }
 }

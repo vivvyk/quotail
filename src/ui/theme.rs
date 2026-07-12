@@ -5,6 +5,9 @@ use ratatui::style::Color;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Theme {
+    /// Window background. Applied to the whole frame so the palette is the palette,
+    /// not the terminal's default.
+    pub bg: Color,
     /// Default foreground.
     pub fg: Color,
     /// Muted text: labels, hints, axis numbers, the passive status row.
@@ -33,6 +36,7 @@ pub struct Theme {
 
 impl Theme {
     pub const TOKYONIGHT: Theme = Theme {
+        bg: Color::Rgb(0x16, 0x18, 0x1f),
         fg: Color::Rgb(0xc0, 0xca, 0xf5),
         muted: Color::Rgb(0x56, 0x5f, 0x89),
         up: Color::Rgb(0x9e, 0xce, 0x6a),

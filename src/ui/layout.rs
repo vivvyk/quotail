@@ -32,20 +32,21 @@ pub const COL_CHANGE_PCT: usize = 9;
 // ---- Detail ------------------------------------------------------------
 /// Right rail (fundamentals) width — FIXED, like the watchlist. The main chart
 /// takes the rest (`W - DETAIL_RAIL_WIDTH`).
-pub const DETAIL_RAIL_WIDTH: u16 = 32;
+pub const DETAIL_RAIL_WIDTH: u16 = 40;
 /// Price-axis gutter on the right of the detail chart. The candle-column count is
 /// `main_width - 4 - DETAIL_AXIS_WIDTH`.
 pub const DETAIL_AXIS_WIDTH: usize = 8;
-/// Fixed-height strips (body rows, excluding their two borders).
-pub const DETAIL_VOLUME_ROWS: usize = 3;
-pub const DETAIL_RSI_ROWS: usize = 4;
+/// Fixed-height strips (body rows, excluding their two borders). The main chart
+/// gave a row to each so the three panels feel more balanced.
+pub const DETAIL_VOLUME_ROWS: usize = 4;
+pub const DETAIL_RSI_ROWS: usize = 5;
 /// Fundamentals rail: label column then right-aligned value column.
 pub const RAIL_LABEL_WIDTH: usize = 15;
 pub const RAIL_VALUE_WIDTH: usize = 13;
 
 // ---- Help overlay ------------------------------------------------------
 pub const HELP_WIDTH: u16 = 76;
-pub const HELP_HEIGHT: u16 = 24;
+pub const HELP_HEIGHT: u16 = 25;
 
 // ---- Bottom region -----------------------------------------------------
 /// Row 1 = passive state, row 2 = keyhints (becomes the `:` command line).

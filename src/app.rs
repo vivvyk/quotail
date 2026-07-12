@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::config::Config;
 use crate::data::types::{Candle, Fundamentals, Indicators, MarketStatus, Quote, Timeframe};
 use crate::ui::layout::MAX_SLOTS;
 
@@ -108,9 +109,13 @@ pub struct AppState {
     pub sort: SortKey,
     pub sort_desc: bool,
     pub selected_row: usize,
-    /// The default watchlist is ~68 symbols but only 14 rows are visible,
-    /// so the table scrolls. j/k past an edge moves this.
+    /// A long watchlist scrolls: j/k past an edge moves this.
     pub scroll_offset: usize,
+    /// Data rows the watchlist body can show at the CURRENT terminal height.
+    /// Derived from the terminal size (the box stretches vertically), refreshed
+    /// on resize — not persisted. Used to keep the selection in view; the renderer
+    /// derives the same count straight from its draw area.
+    pub viewport_rows: usize,
 
     // ---- Chart grid ----
     /// A FIXED ARRAY, not a Vec: the 4-pane cap is enforced by the type.
@@ -133,6 +138,13 @@ pub struct AppState {
     pub status_msg: Option<String>,
     /// Cell offset of the hot-movers marquee. Advanced by Action::Tick.
     pub marquee_offset: usize,
+
+    // ---- Settings ----
+    /// The live, editable config. The Settings screen reads and mutates THIS (not
+    /// the `Arc<Config>` the producers hold); `w` writes it back to `config.toml`.
+    pub config: Config,
+    /// Which editable Settings row is selected (j/k). Ephemeral.
+    pub settings_row: usize,
 
     // ---- Lifecycle ----
     pub should_quit: bool,
