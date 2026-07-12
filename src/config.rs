@@ -132,6 +132,19 @@ impl Config {
         // Never 0: a 0-second interval would busy-loop the poller.
         Duration::from_secs(self.data.poll_interval_sec.max(1))
     }
+
+    /// The MCP Unix-socket path with a leading `~/` expanded to the home dir.
+    /// Shared by the TUI's listener and (Step 3) the MCP server's client, so both
+    /// resolve to the exact same file.
+    pub fn socket_path(&self) -> PathBuf {
+        let raw = &self.mcp.socket_path;
+        if let Some(rest) = raw.strip_prefix("~/")
+            && let Some(base) = directories::BaseDirs::new()
+        {
+            return base.home_dir().join(rest);
+        }
+        PathBuf::from(raw)
+    }
 }
 
 /// `~/.config/quotail/config.toml`.

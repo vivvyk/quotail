@@ -17,5 +17,6 @@ pub mod event_loop;
 pub mod session;
 
 pub mod data;
+pub mod ipc;
 pub mod mcp;
 pub mod ui;

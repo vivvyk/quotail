@@ -1,21 +1,24 @@
-//! MCP server (`quotail --mcp`). Read tools — Step 1.
+//! MCP server (`quotail --mcp`). Read tools (Step 1) + session control (Step 3a).
 //!
 //! This is the whole differentiator: Quotail has no AI inside it, so analysis
 //! happens by attaching Claude to THIS server. The tools are deliberately thin —
-//! deserialize args, call `DataStore`, serialize the result as JSON text.
+//! deserialize args, call `DataStore` (or the socket), serialize the result.
 //!
-//! IMPORTANT: this process has its OWN `DataStore` and its OWN in-memory cache.
-//! It does NOT share the running TUI's cache — the read tools work whether or not
-//! a TUI is running, straight from `config.toml` + a fresh Yahoo fetch. Refetching
-//! is cheap (the batch quote is one HTTP call), so nobody should later assume a
-//! shared cache.
+//! Two capability tiers, with graceful degradation:
+//!   - READ tools serve straight from this process's OWN `DataStore` + cache (NOT
+//!     the running TUI's — they're separate; refetching is cheap, one batch HTTP
+//!     call). They work whether or not a TUI is running, from `config.toml`.
+//!   - SESSION-CONTROL tools drive a running TUI by writing a `RemoteAction` line
+//!     to its Unix socket (`crate::ipc`). No new command logic — the event loop
+//!     can't tell it from a keystroke. No TUI running ⇒ a clear, actionable error;
+//!     the read tools are unaffected. `get_session` (the read-back) is Step 3b.
 //!
-//! Layering: `mcp/` depends on `data/` and `config` only. Session tools that DRIVE
-//! a live TUI over the Unix socket come in Steps 2–3; nothing here needs a socket.
+//! Layering: `mcp/` depends on `data/`, `config`, and `ipc` (the socket client).
 //!
 //! stdio contract: stdout is the JSON-RPC channel. Nothing in this path may print
 //! to stdout — tool payloads travel as protocol messages, and errors go to stderr.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use rmcp::{
@@ -27,14 +30,19 @@ use rmcp::{
 };
 use serde::Deserialize;
 
+use crate::action::RemoteAction;
 use crate::data::store::DataStore;
 use crate::data::types::{AssetKind, Timeframe};
+use crate::ui::layout::MAX_SLOTS;
 
-/// The read-only market-data server. Holds only the store; the watchlist is read
-/// fresh from `config.toml` per call so it tracks `:add`/`:rm` the TUI persisted.
+/// The market-data + session-control server. Read tools hit `store` directly (its
+/// own cache); session tools drive a running TUI over `socket_path`. The watchlist
+/// is read fresh from `config.toml` per call so it tracks `:add`/`:rm` the TUI
+/// persisted; `socket_path` is stable for the process, so it's resolved once.
 #[derive(Clone)]
 pub struct QuotailServer {
     store: Arc<DataStore>,
+    socket_path: PathBuf,
     tool_router: ToolRouter<Self>,
 }
 
@@ -61,6 +69,18 @@ struct ChartArgs {
     timeframe: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct TimeframeArg {
+    /// Human timeframe label — one of `1D`, `5D`, `1M`, `6M`, `YTD`, `1Y`, `MAX`.
+    timeframe: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ClearSlotArg {
+    /// Pane index `0`–`3` to clear one chart; omit to clear ALL four panes.
+    slot: Option<usize>,
+}
+
 /// Watchlist membership row: symbol plus the asset kind it's classified as.
 #[derive(serde::Serialize)]
 struct WatchlistEntry {
@@ -70,9 +90,10 @@ struct WatchlistEntry {
 
 #[tool_router]
 impl QuotailServer {
-    pub fn new(store: Arc<DataStore>) -> Self {
+    pub fn new(store: Arc<DataStore>, socket_path: PathBuf) -> Self {
         Self {
             store,
+            socket_path,
             tool_router: Self::tool_router(),
         }
     }
@@ -192,8 +213,134 @@ impl QuotailServer {
         to caveat quote freshness (prices are last-trade when closed)."
     )]
     async fn get_market_status(&self) -> Result<CallToolResult, String> {
-        let status = self.store.market_status().await.map_err(|e| e.to_string())?;
+        let status = self
+            .store
+            .market_status()
+            .await
+            .map_err(|e| e.to_string())?;
         json_result(&status)
+    }
+
+    // ---- session control (drive a running TUI over the socket) --------------
+    // Each is a one-way RemoteAction; there is NO new command logic — the TUI's
+    // event loop treats it exactly like the equivalent keystroke. All require a
+    // running TUI and return a clear error if none is (the read tools above do
+    // not — they work regardless).
+
+    #[tool(
+        description = "Add a symbol to the RUNNING TUI's watchlist (also persisted to \
+        config.toml). Requires a running Quotail TUI; errors clearly if none is up. \
+        Symbol in Yahoo convention (e.g. AAPL, BTC-USD, ^GSPC)."
+    )]
+    async fn add_symbol(
+        &self,
+        Parameters(args): Parameters<SymbolArg>,
+    ) -> Result<CallToolResult, String> {
+        let symbol = args.symbol.trim().to_uppercase();
+        self.drive(
+            RemoteAction::AddSymbol {
+                symbol: symbol.clone(),
+            },
+            format!("added {symbol} to the watchlist"),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Remove a symbol from the RUNNING TUI's watchlist (also updates \
+        config.toml). Requires a running Quotail TUI. Symbol in Yahoo convention."
+    )]
+    async fn remove_symbol(
+        &self,
+        Parameters(args): Parameters<SymbolArg>,
+    ) -> Result<CallToolResult, String> {
+        let symbol = args.symbol.trim().to_uppercase();
+        self.drive(
+            RemoteAction::RemoveSymbol {
+                symbol: symbol.clone(),
+            },
+            format!("removed {symbol} from the watchlist"),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Open a chart for a symbol in the RUNNING TUI's 2x2 grid: fills \
+        the first empty pane, or replaces the focused pane when all four are full. \
+        Use this to 'show/chart/pull up' a symbol. Requires a running Quotail TUI. \
+        Symbol in Yahoo convention."
+    )]
+    async fn chart_symbol(
+        &self,
+        Parameters(args): Parameters<SymbolArg>,
+    ) -> Result<CallToolResult, String> {
+        let symbol = args.symbol.trim().to_uppercase();
+        self.drive(
+            RemoteAction::ChartSymbol {
+                symbol: symbol.clone(),
+            },
+            format!("charting {symbol} in the grid"),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Clear chart panes in the RUNNING TUI. Pass slot 0-3 to clear \
+        one pane; omit slot to clear all four. Requires a running Quotail TUI."
+    )]
+    async fn clear_slot(
+        &self,
+        Parameters(args): Parameters<ClearSlotArg>,
+    ) -> Result<CallToolResult, String> {
+        if let Some(n) = args.slot
+            && n >= MAX_SLOTS
+        {
+            return Err(format!("slot must be 0-{}, got {n}", MAX_SLOTS - 1));
+        }
+        let msg = match args.slot {
+            Some(n) => format!("cleared pane {n}"),
+            None => "cleared all panes".to_string(),
+        };
+        self.drive(RemoteAction::ClearSlot { slot: args.slot }, msg)
+            .await
+    }
+
+    #[tool(
+        description = "Open the full-screen detail drilldown for a symbol in the \
+        RUNNING TUI (large chart, volume, RSI, fundamentals rail). Requires a running \
+        Quotail TUI. Symbol in Yahoo convention."
+    )]
+    async fn open_detail(
+        &self,
+        Parameters(args): Parameters<SymbolArg>,
+    ) -> Result<CallToolResult, String> {
+        let symbol = args.symbol.trim().to_uppercase();
+        self.drive(
+            RemoteAction::OpenDetail {
+                symbol: symbol.clone(),
+            },
+            format!("opened detail for {symbol}"),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Set the global chart timeframe in the RUNNING TUI (applies to \
+        the grid and detail). Pass a human label: 1D, 5D, 1M, 6M, YTD, 1Y, or MAX. \
+        Requires a running Quotail TUI."
+    )]
+    async fn set_timeframe(
+        &self,
+        Parameters(args): Parameters<TimeframeArg>,
+    ) -> Result<CallToolResult, String> {
+        // The wire form of Timeframe is its serde name (Y1, YTD, …), NOT the human
+        // label (1Y). Parse the label here so Claude passes what a user would say.
+        let tf = parse_timeframe(&args.timeframe)?;
+        self.drive(
+            RemoteAction::SetTimeframe { timeframe: tf },
+            format!("timeframe set to {}", tf.label()),
+        )
+        .await
     }
 }
 
@@ -215,9 +362,39 @@ impl ServerHandler for QuotailServer {
                 and get_indicators (OHLCV history and RSI/MA50/MA200 over a timeframe \
                 in {1D,5D,1M,6M,YTD,1Y,MAX}), get_fundamentals (valuation), and \
                 get_market_status. Symbols use Yahoo conventions: BTC-USD for crypto, \
-                ^GSPC for indices."
+                ^GSPC for indices. If a Quotail TUI is running you can also DRIVE it: \
+                add_symbol, remove_symbol, chart_symbol (open a chart in the grid), \
+                open_detail, clear_slot, and set_timeframe (pass a human label like \
+                1Y). Those require a running TUI and error clearly if none is up; the \
+                read tools work either way."
                     .to_string(),
             )
+    }
+}
+
+impl QuotailServer {
+    /// Deliver a one-way `RemoteAction` to the running TUI over the socket, returning
+    /// a confirmation on success or a clear, actionable error when no TUI is running.
+    /// One-shot write, no reply to await — so it can't hang.
+    #[cfg(unix)]
+    async fn drive(&self, action: RemoteAction, ok_msg: String) -> Result<CallToolResult, String> {
+        crate::ipc::send_remote(&self.socket_path, &action).await?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(ok_msg)]))
+    }
+
+    /// Non-unix builds have no session socket: session tools fail cleanly rather
+    /// than pretend to work. (The read tools remain fully functional.)
+    #[cfg(not(unix))]
+    async fn drive(
+        &self,
+        _action: RemoteAction,
+        _ok_msg: String,
+    ) -> Result<CallToolResult, String> {
+        Err(
+            "controlling a running TUI requires a Unix socket, which isn't available \
+             on this platform"
+                .to_string(),
+        )
     }
 }
 
@@ -232,7 +409,9 @@ fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, String>
 /// The user's watchlist, read fresh from `config.toml` each call so it tracks
 /// symbols the TUI `:add`ed and persisted.
 fn watchlist_symbols() -> Result<Vec<String>, String> {
-    Ok(crate::config::load().map_err(|e| e.to_string())?.watchlist())
+    Ok(crate::config::load()
+        .map_err(|e| e.to_string())?
+        .watchlist())
 }
 
 /// Uppercase + drop blanks. Yahoo symbols are uppercase; this mirrors what the
@@ -250,11 +429,15 @@ fn parse_timeframe(s: &str) -> Result<Timeframe, String> {
         .ok_or_else(|| format!("invalid timeframe {s:?}; valid: 1D 5D 1M 6M YTD 1Y MAX"))
 }
 
-/// Entry point for `quotail --mcp`: serve the read tools over stdio until the
-/// client disconnects. The server owns `store` (its own cache, separate from any
-/// running TUI).
+/// Entry point for `quotail --mcp`: serve the tools over stdio until the client
+/// disconnects. The server owns `store` (its own cache, separate from any running
+/// TUI) and the resolved session socket path (stable for the process; the read
+/// tools re-read the watchlist per call, but the socket path never changes).
 pub async fn run(store: Arc<DataStore>) -> anyhow::Result<()> {
-    let service = QuotailServer::new(store).serve(stdio()).await?;
+    let socket_path = crate::config::load()?.socket_path();
+    let service = QuotailServer::new(store, socket_path)
+        .serve(stdio())
+        .await?;
     service.waiting().await?;
     Ok(())
 }

@@ -27,6 +27,13 @@ pub fn render(buf: &mut Buffer, area: Rect, state: &AppState) {
         word,
         Style::default().fg(status_color(state.market_status, theme)),
     );
+    // MCP listener notice (muted), shown ONLY when the socket didn't bind — a
+    // live degraded state, so it never appears in the snapshot fixtures. Sits in
+    // the otherwise-empty span between the status word and the `[tf]` at col 51.
+    if let Some(notice) = state.mcp_listener.notice() {
+        buf.set_string(x + 18, y, notice, muted);
+    }
+
     // The `(Opens …)` next-open hint is deferred (needs a market calendar); the
     // snapshot masks that span. `[tf]` (warn/yellow) shows only on the chart views.
     if matches!(state.view, View::Overview | View::Detail) {

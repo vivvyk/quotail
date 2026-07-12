@@ -189,6 +189,7 @@ fn base_state() -> AppState {
         marquee_offset: 0,
         config: quotail::config::Config::default(),
         settings_row: 0,
+        mcp_listener: quotail::app::McpListener::Active,
         should_quit: false,
     }
 }
@@ -577,3 +578,30 @@ fn settings_is_top_aligned_with_bar_on_floor() {
     }
 }
 
+// ---- MCP listener status surfacing ----------------------------------------
+
+#[test]
+fn mcp_inactive_notice_shows_only_when_degraded() {
+    use quotail::app::McpListener;
+    // The status row is the first of the two bottom rows (row 29 at 96x31).
+    const STATUS_ROW: usize = 29;
+
+    let mut degraded = overview_state();
+    degraded.mcp_listener = McpListener::OtherInstance;
+    let status = &render_lines(&degraded)[STATUS_ROW];
+    assert!(
+        status.contains("MCP: inactive (another instance)"),
+        "a live second instance must be surfaced; got: {status:?}"
+    );
+
+    // Healthy / disabled states render nothing — this is why the snapshots (which
+    // use McpListener::Active) are unaffected by Step 2.
+    for quiet in [McpListener::Active, McpListener::Disabled] {
+        let mut s = overview_state();
+        s.mcp_listener = quiet;
+        assert!(
+            !render_lines(&s)[STATUS_ROW].contains("MCP:"),
+            "{quiet:?} should not render an MCP notice"
+        );
+    }
+}

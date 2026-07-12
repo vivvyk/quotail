@@ -146,8 +146,40 @@ pub struct AppState {
     /// Which editable Settings row is selected (j/k). Ephemeral.
     pub settings_row: usize,
 
+    // ---- MCP ----
+    /// State of the Unix-socket listener, surfaced (only when degraded) in the
+    /// status row. Set once at startup after the bind attempt.
+    pub mcp_listener: McpListener,
+
     // ---- Lifecycle ----
     pub should_quit: bool,
+}
+
+/// Whether the MCP session socket bound, and if not, why — so the status row can
+/// say so instead of degrading silently. Only the degraded variants render text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum McpListener {
+    /// Bound and serving — or a platform without the socket (nothing to report).
+    #[default]
+    Active,
+    /// `[mcp].enabled = false`: the user opted out. No notice.
+    Disabled,
+    /// A live instance already owns the socket; we skipped binding rather than
+    /// refuse to launch. The other instance keeps serving Claude.
+    OtherInstance,
+    /// Bind failed (permissions, unwritable path, …). MCP session tools are off.
+    Failed,
+}
+
+impl McpListener {
+    /// The muted status-row notice, or `None` when there's nothing to surface.
+    pub fn notice(self) -> Option<&'static str> {
+        match self {
+            McpListener::Active | McpListener::Disabled => None,
+            McpListener::OtherInstance => Some("MCP: inactive (another instance)"),
+            McpListener::Failed => Some("MCP: inactive (socket error)"),
+        }
+    }
 }
 
 /// The disposable slice of state written to `~/.local/state/quotail/session.json`

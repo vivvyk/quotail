@@ -63,6 +63,7 @@ pub fn initial_state(config: &Config, session: Option<Session>) -> AppState {
         marquee_offset: 0,
         config: config.clone(),
         settings_row: 0,
+        mcp_listener: crate::app::McpListener::Active,
         should_quit: false,
     };
 
@@ -842,6 +843,13 @@ pub async fn run_tui(config: Config, store: Arc<DataStore>) -> anyhow::Result<()
     refetch_charts(&mut state, &ctx, false);
     spawn_poller(&ctx);
     spawn_tick(tx.clone(), Duration::from_millis(MARQUEE_TICK_MS));
+
+    // The MCP session socket is just a fifth producer feeding the same channel.
+    // Unix-only; on Windows the TUI runs without live attach. `mcp_socket` is the
+    // path we own and must unlink on quit (None when we didn't bind).
+    #[cfg(unix)]
+    let mcp_socket = spawn_mcp_listener(&config, &mut state, tx.clone());
+
     spawn_input(tx); // consumes the last `tx`; producers keep their own clones
 
     // `try_init` enables raw mode, enters the alternate screen, and installs a
@@ -853,9 +861,47 @@ pub async fn run_tui(config: Config, store: Arc<DataStore>) -> anyhow::Result<()
     let outcome = run_loop(&mut terminal, &mut state, &ctx, &mut rx).await;
     ratatui::restore();
 
+    // Remove OUR socket file (only if we bound it — never another instance's).
+    #[cfg(unix)]
+    if let Some(path) = mcp_socket {
+        let _ = std::fs::remove_file(path);
+    }
+
     // Persist the session regardless of how the loop ended.
     crate::session::save(&session_snapshot(&state));
     outcome
+}
+
+/// Bind the MCP session socket and record the outcome in `state.mcp_listener`.
+/// Returns the socket path we own (to unlink on quit), or `None` if we didn't bind
+/// — disabled in config, already owned by a live instance, or a bind failure.
+#[cfg(unix)]
+fn spawn_mcp_listener(
+    config: &Config,
+    state: &mut AppState,
+    tx: UnboundedSender<Action>,
+) -> Option<std::path::PathBuf> {
+    use crate::app::McpListener;
+    use crate::ipc::{BindOutcome, spawn_listener};
+
+    if !config.mcp.enabled {
+        state.mcp_listener = McpListener::Disabled;
+        return None;
+    }
+    match spawn_listener(&config.socket_path(), tx) {
+        BindOutcome::Bound(path) => {
+            state.mcp_listener = McpListener::Active;
+            Some(path)
+        }
+        BindOutcome::OtherInstance => {
+            state.mcp_listener = McpListener::OtherInstance;
+            None
+        }
+        BindOutcome::Failed => {
+            state.mcp_listener = McpListener::Failed;
+            None
+        }
+    }
 }
 
 /// The consumer loop: draw once, then redraw after each batch of actions. Bursts
