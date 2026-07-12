@@ -1,0 +1,61 @@
+# Quotail — default configuration.
+#
+# This file is a TEMPLATE. On first run it is copied to
+#   ~/.config/quotail/config.toml
+# and that copy is yours to edit. Quotail never writes to this one.
+#
+# Ephemeral session state (which charts you had open, etc.) is NOT stored here.
+# It lives in ~/.local/state/quotail/session.json and is safe to delete.
+#
+# Quotail requires no API keys. Yahoo Finance needs none, and there is no AI in
+# the app — analysis is done by connecting Claude to the MCP server below.
+
+[watchlist]
+# Roughly the largest S&P 500 constituents by index weight. Weights drift over
+# time, so treat this as a starting point, not a maintained index snapshot.
+stocks = [
+  "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "BRK-B", "LLY",
+  "JPM", "V", "XOM", "UNH", "MA", "COST", "HD", "PG", "JNJ", "WMT",
+  "NFLX", "ABBV", "CRM", "BAC", "ORCL", "CVX", "MRK", "KO", "AMD", "PEP",
+  "TMO", "LIN", "ADBE", "CSCO", "ACN", "MCD", "ABT", "PM", "WFC", "IBM",
+  "GE", "TXN", "QCOM", "DHR", "VZ", "NOW", "INTU", "CAT", "DIS", "GS",
+]
+
+crypto = [
+  "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "BNB-USD",
+  "ADA-USD", "DOGE-USD", "AVAX-USD", "LINK-USD", "DOT-USD",
+]
+
+indices = ["^GSPC", "^IXIC", "^DJI", "^RUT", "^VIX", "^FTSE", "^N225", "^GDAXI"]
+
+[display]
+theme = "tokyonight"          # tokyonight | gruvbox | catppuccin | nord
+default_timeframe = "1M"      # 1D | 5D | 1M | 6M | YTD | 1Y | MAX
+default_filter = "all"        # all | stocks | crypto | indices
+default_sort = "change_pct"   # symbol | price | change_pct | market_cap
+
+# The hot-movers tape scrolls, which means a redraw every tick — the app is
+# never fully idle. Set false to render it statically.
+ticker_scroll = true
+ticker_speed_ms = 140
+
+[data]
+provider = "yahoo"
+# Polling is what makes prices look live. It is NOT a stream: Yahoo has no
+# websocket. The `Last Refresh` clock in the status row is therefore load-bearing
+# — it tells the truth about staleness. Press `r` to force a refresh.
+poll_interval_sec = 60
+cache_ttl_sec = 30
+
+[mcp]
+# Exposes Quotail's data to Claude (Claude Code / Desktop) via `quotail --mcp`.
+#
+# Read tools (get_watchlist_quotes, get_candles, ...) work by reading THIS config,
+# so they function whether or not the TUI is running.
+#
+# If a TUI instance IS running, the MCP server also connects to it over this Unix
+# socket, which additionally exposes live session state and lets Claude drive the
+# UI (add a symbol, open a chart). Local-only, filesystem-permissioned, never
+# touches the network.
+enabled = true
+socket_path = "~/.local/state/quotail/quotail.sock"
