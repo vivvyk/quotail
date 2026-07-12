@@ -130,12 +130,16 @@ calls `chart_symbol` three times — and the charts appear in your terminal.
 
 ### Setup
 
-Install a real binary, then register the server.
+Install the binary, then register it with Claude Code at **user scope** — so the
+server works from any directory, not just one project:
 
 ```sh
-cargo install --path .          # so there's a `quotail` on your PATH
-claude mcp add quotail -- quotail --mcp
+cargo install quotail
+claude mcp add --scope user quotail quotail -- --mcp
 ```
+
+Building from source instead of `cargo install`? Register your own absolute
+binary path in place of the bare `quotail` name — see [docs/MCP.md](docs/MCP.md).
 
 Or add it to your client's MCP config manually:
 
@@ -149,6 +153,9 @@ Or add it to your client's MCP config manually:
   }
 }
 ```
+
+Verify it from anywhere: `cd /tmp && claude`, then ask *"how's my watchlist
+doing?"* — if it answers from outside the project directory, you're set.
 
 See [docs/MCP.md](docs/MCP.md) for the full reference: every tool, its arguments and
 return shape, the socket's security model, and more example prompts.

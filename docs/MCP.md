@@ -21,25 +21,46 @@ There are two tiers of tools:
 
 ## Setup
 
-### 1. Install a real binary
+### 1. Install the binary
 
-MCP clients launch a command, so you need `quotail` on disk:
+MCP clients launch a command, so you need `quotail` on your `PATH`:
 
 ```sh
-cargo install --path .
-# or, once published:
 cargo install quotail
 ```
 
-This puts `quotail` on your `PATH` (typically `~/.cargo/bin/quotail`).
+This installs the `quotail` binary (typically to `~/.cargo/bin/quotail`), which
+`cargo install` puts on your `PATH`.
 
-### 2. Register the server with your client
+### 2. Register the server with Claude Code
 
-**Claude Code** (one-liner):
+Register it at **user scope** so it's available from every directory:
 
 ```sh
-claude mcp add quotail -- quotail --mcp
+claude mcp add --scope user quotail quotail -- --mcp
 ```
+
+This registers an MCP server named `quotail` whose command is the bare `quotail`
+binary — resolved from your `PATH`, not a hard-coded path — invoked with `--mcp`.
+
+**Why user scope matters.** The default is *project* scope, which registers the
+server only for the directory you ran the command in: Claude sees it when
+launched from there and is blind to it everywhere else. That's almost never what
+you want for a tool like Quotail, which you'll ask about from any directory.
+`--scope user` registers it once for your whole account, so it works from
+wherever you launch Claude.
+
+**Building from source instead?** If you built the binary yourself
+(`cargo build --release`) rather than running `cargo install`, there may be no
+`quotail` on your `PATH`. Point the registration at your own absolute binary path
+instead of the bare name:
+
+```sh
+claude mcp add --scope user quotail /path/to/quotail/target/release/quotail -- --mcp
+```
+
+That's legitimate — just not the default. Everything else (user scope, the
+`--mcp` flag) stays the same.
 
 **Claude Desktop / manual config** — add to your MCP config file:
 
@@ -54,9 +75,29 @@ claude mcp add quotail -- quotail --mcp
 }
 ```
 
+(Building from source: replace `"quotail"` with the absolute path to your built
+binary.)
+
 `quotail --mcp` speaks MCP over stdio. It reads your watchlist from
 `~/.config/quotail/config.toml` on every call, so it always reflects your current
 symbols — including edits made live in the TUI.
+
+### 3. Verify it works from anywhere
+
+The whole point of user scope is that the server isn't tied to one directory —
+so test it from a directory that *isn't* the project:
+
+```sh
+cd /tmp && claude
+```
+
+Then ask:
+
+> *"How's my watchlist doing?"*
+
+If Claude answers with your live quotes from outside the project directory, the
+setup is correct. If it can't find the tool, the registration probably landed at
+project scope — re-run step 2 with `--scope user`.
 
 ---
 
