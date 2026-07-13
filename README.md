@@ -20,6 +20,10 @@ cargo install quotail
 quotail
 ```
 
+> After installing, make sure `~/.cargo/bin` is on your `PATH`. If `quotail`
+> isn't found in a new shell, add `source "$HOME/.cargo/env"` to your shell
+> profile (`~/.zshrc` on macOS, `~/.bashrc` on Linux) or manually source it.
+
 On first launch, Quotail writes a default config to
 `~/.config/quotail/config.toml` and starts polling quotes. No API key or account is
 required.
