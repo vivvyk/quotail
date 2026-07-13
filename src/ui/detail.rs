@@ -32,7 +32,7 @@ fn candle_cols(width: u16) -> usize {
 }
 
 pub fn render(frame: &mut Frame, state: &AppState) {
-    let theme = Theme::TOKYONIGHT;
+    let theme = state.theme;
     let area = frame.area();
     let (w, h) = (area.width, area.height);
     let buf = frame.buffer_mut();
@@ -123,7 +123,7 @@ fn render_main_chart(
             height: area.height.saturating_sub(2),
         };
         let cols = chart::aggregate(&d.candles, &d.indicators, state.timeframe.display_span(), n);
-        chart::render_candles(buf, interior, &cols);
+        chart::render_candles(buf, interior, &cols, theme);
         // Price axis in the right gutter (high at top, mid in the middle, low at the
         // bottom) — this is what fills the space right of the candles.
         if let Some((lo, hi)) = chart::price_range(&cols) {

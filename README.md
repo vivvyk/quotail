@@ -38,6 +38,9 @@ quotail
 - **Rust 1.85+** (edition 2024) — to `cargo install` or build from source.
 - **Linux or macOS** — MCP session control uses a Unix domain socket.
 - **Network access** to Yahoo Finance.
+- **Any color terminal** — no truecolor requirement. Quotail auto-detects the
+  terminal's color depth (24-bit, 256-color, or 16-color) and degrades the palette
+  gracefully; it just looks best with truecolor.
 
 ---
 
@@ -54,6 +57,9 @@ quotail
 - **Vim-modal keybinds** — `hjkl` navigation, `/` search, and a `:` command line.
 - **Scrolling hot-movers tape** across the top.
 - **Themeable** — `tokyonight`, `gruvbox`, `catppuccin`, `nord`.
+- **Adapts to your terminal** — auto-detects color depth (truecolor / 256 / 16) and
+  degrades the palette gracefully, imposing its own background at every depth so it
+  looks the same on a light or dark terminal.
 - **MCP server** built in — connect Claude and let it read *and* drive Quotail.
 
 ---

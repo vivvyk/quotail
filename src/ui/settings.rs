@@ -120,7 +120,7 @@ const ROWS: &[Row] = &[
 pub const ROW_COUNT: usize = ROWS.len();
 
 pub fn render(frame: &mut Frame, state: &AppState) {
-    let theme = Theme::TOKYONIGHT;
+    let theme = state.theme;
     let full = frame.area();
     let (w, height) = (full.width, full.height);
     let buf = frame.buffer_mut();

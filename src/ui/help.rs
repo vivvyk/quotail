@@ -48,8 +48,7 @@ const HEADINGS: [&str; 5] = [
     "commands",
 ];
 
-pub fn render(frame: &mut Frame) {
-    let theme = Theme::TOKYONIGHT;
+pub fn render(frame: &mut Frame, theme: Theme) {
     let area = frame.area();
     // Center in whatever size we're given. At 96x31 this is x=10, y=3 (the
     // reference); at 200 cols it tracks the middle instead of pinning left.

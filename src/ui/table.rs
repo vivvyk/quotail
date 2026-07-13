@@ -100,7 +100,7 @@ const SORT_COL: u16 = 33;
 const SCROLL_COL: u16 = 38;
 
 pub fn render(buf: &mut Buffer, area: Rect, state: &AppState) {
-    let theme = Theme::TOKYONIGHT;
+    let theme = state.theme;
     // Focus dims the BORDER only; the title/content keep their own colors.
     let border = Style::default().fg(if state.focus == FocusRegion::Table {
         theme.border_focus
@@ -188,13 +188,19 @@ pub fn render(buf: &mut Buffer, area: Rect, state: &AppState) {
         }
     }
 
-    render_scrollbar(buf, area, rows.len(), state.scroll_offset, visible);
+    render_scrollbar(buf, area, rows.len(), state.scroll_offset, visible, theme);
 }
 
 /// A right-anchored thumb on the panel's right-inner column (col 38). `visible` is
 /// the body-row count for the current panel height.
-fn render_scrollbar(buf: &mut Buffer, area: Rect, total: usize, offset: usize, visible: usize) {
-    let theme = Theme::TOKYONIGHT;
+fn render_scrollbar(
+    buf: &mut Buffer,
+    area: Rect,
+    total: usize,
+    offset: usize,
+    visible: usize,
+    theme: Theme,
+) {
     if total <= visible {
         return;
     }

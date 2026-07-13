@@ -132,8 +132,8 @@ pub fn render_grid_pane(
     columns: &[Option<Column>],
     tf_label: &str,
     border_style: Style,
+    theme: Theme,
 ) {
-    let theme = Theme::TOKYONIGHT;
     super::draw_box(buf, area, "", border_style, border_style);
 
     // Title spans over the top border: `┌─ SYM price +chg% ` then the pre-drawn dashes.
@@ -175,12 +175,11 @@ pub fn render_grid_pane(
         width: area.width.saturating_sub(4),
         height: area.height.saturating_sub(2),
     };
-    render_candles(buf, interior, columns);
+    render_candles(buf, interior, columns, theme);
 }
 
 /// An empty pane: plain box with a centered `enter to chart` prompt.
-pub fn render_empty_pane(buf: &mut Buffer, area: Rect, border_style: Style) {
-    let theme = Theme::TOKYONIGHT;
+pub fn render_empty_pane(buf: &mut Buffer, area: Rect, border_style: Style, theme: Theme) {
     super::draw_box(buf, area, "", border_style, border_style);
     let text = "enter to chart";
     let x = area.x + (area.width - text.len() as u16) / 2;
@@ -231,8 +230,12 @@ pub(crate) fn price_range(columns: &[Option<Column>]) -> Option<(f64, f64)> {
 /// still-empty cells — a candle always wins. Up/down color by close vs open;
 /// ma50 in `warn`, ma200 in `heading` (per the theme). Shared by the grid panes
 /// and the larger Detail chart.
-pub(crate) fn render_candles(buf: &mut Buffer, area: Rect, columns: &[Option<Column>]) {
-    let theme = Theme::TOKYONIGHT;
+pub(crate) fn render_candles(
+    buf: &mut Buffer,
+    area: Rect,
+    columns: &[Option<Column>],
+    theme: Theme,
+) {
     let Some((lo, hi)) = price_range(columns) else {
         return;
     };
@@ -413,7 +416,7 @@ mod tests {
         // open=2, close=6 (up), high=8, low=0 → wick rows 0-4, body rows 1-3.
         let columns = vec![col(2.0, 8.0, 0.0, 6.0, None, None)];
         let mut buf = Buffer::empty(Rect::new(0, 0, 1, 5));
-        render_candles(&mut buf, Rect::new(0, 0, 1, 5), &columns);
+        render_candles(&mut buf, Rect::new(0, 0, 1, 5), &columns, Theme::TOKYONIGHT);
         assert_eq!(glyphs(&buf, 0, 5), vec!["│", "█", "█", "█", "│"]);
     }
 
@@ -428,7 +431,7 @@ mod tests {
         // (empty → dot); ma200=8 → row 0 (candle already there → no dot).
         let columns = vec![col(6.0, 8.0, 6.0, 8.0, Some(2.0), Some(8.0))];
         let mut buf = Buffer::empty(Rect::new(0, 0, 1, 5));
-        render_candles(&mut buf, Rect::new(0, 0, 1, 5), &columns);
+        render_candles(&mut buf, Rect::new(0, 0, 1, 5), &columns, Theme::TOKYONIGHT);
         assert_eq!(glyphs(&buf, 0, 5), vec!["█", "█", " ", " ", "·"]);
     }
 

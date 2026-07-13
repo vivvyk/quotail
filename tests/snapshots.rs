@@ -190,6 +190,9 @@ fn base_state() -> AppState {
         config: quotail::config::Config::default(),
         settings_row: 0,
         mcp_listener: quotail::app::McpListener::Active,
+        // Snapshots assert glyphs, not color, so the depth is irrelevant here — pin
+        // truecolor for determinism regardless of the host terminal's $COLORTERM.
+        theme: quotail::ui::theme::Theme::TOKYONIGHT,
         should_quit: false,
     }
 }
@@ -575,6 +578,66 @@ fn settings_is_top_aligned_with_bar_on_floor() {
             line.trim().is_empty(),
             "row {r} should be blank slack, got: {line:?}"
         );
+    }
+}
+
+// ---- color-depth fallbacks -------------------------------------------------
+// The chrome tests above pin GLYPHS and are depth-agnostic. These pin the COLOR
+// contract instead: at every depth the whole frame is painted (no terminal
+// background bleeds through — the light-terminal bug), and a limited terminal is
+// never handed a Color::Rgb it can't render (the Terminal.app bug).
+
+use quotail::ui::theme::{ColorDepth, Theme};
+use ratatui::style::Color;
+
+/// Render a state at 96x31 and return the raw buffer so cell STYLES (not just
+/// glyphs) can be inspected.
+fn render_buffer(state: &AppState) -> ratatui::buffer::Buffer {
+    let backend = TestBackend::new(96, 31);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| quotail::ui::render(f, state)).unwrap();
+    terminal.backend().buffer().clone()
+}
+
+/// The whole frame must be painted at every depth: every cell carries the theme's
+/// own background, never `Color::Reset`. If a cell showed through as Reset, a white
+/// terminal would glare through the gap — exactly the Linux regression we guard.
+#[test]
+fn frame_background_is_imposed_at_every_depth() {
+    for depth in [ColorDepth::Truecolor, ColorDepth::Ansi256, ColorDepth::Basic] {
+        let theme = Theme::for_depth(depth);
+        for mut state in [overview_state(), detail_state(), settings_state(), help_state()] {
+            state.theme = theme;
+            let buf = render_buffer(&state);
+            for cell in buf.content() {
+                assert_ne!(
+                    cell.bg,
+                    Color::Reset,
+                    "{depth:?}: a cell had a Reset background — the frame isn't fully painted"
+                );
+            }
+        }
+    }
+}
+
+/// A 256- or 16-color terminal must never receive `Color::Rgb` — that's precisely
+/// what Terminal.app mangles. Every emitted color must be `Indexed`/ANSI-named.
+#[test]
+fn limited_depths_never_emit_rgb() {
+    for depth in [ColorDepth::Ansi256, ColorDepth::Basic] {
+        let theme = Theme::for_depth(depth);
+        for mut state in [overview_state(), detail_state(), settings_state(), help_state()] {
+            state.theme = theme;
+            let buf = render_buffer(&state);
+            for cell in buf.content() {
+                for c in [cell.fg, cell.bg] {
+                    assert!(
+                        !matches!(c, Color::Rgb(..)),
+                        "{depth:?}: a cell emitted {c:?} — a limited terminal can't render Rgb"
+                    );
+                }
+            }
+        }
     }
 }
 

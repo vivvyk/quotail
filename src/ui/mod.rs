@@ -23,17 +23,19 @@ use crate::app::View;
 
 /// Draw the whole frame: the current view, then the help overlay on top if open.
 pub fn render(frame: &mut Frame, state: &AppState) {
+    let theme = state.theme;
     let area = frame.area();
-    // Paint the theme background across the whole frame first. Later text is drawn
-    // with fg-only styles, which patch the fg and PRESERVE this bg.
+    // Paint the theme background across the WHOLE frame first — at every color depth,
+    // never Color::Reset. Later text is drawn with fg-only styles, which patch the fg
+    // and PRESERVE this bg, so no gap lets a light terminal show through.
     frame
         .buffer_mut()
-        .set_style(area, Style::default().bg(theme::Theme::TOKYONIGHT.bg));
+        .set_style(area, Style::default().bg(theme.bg));
 
     // Below the minimum, the fixed panels (watchlist 40, rail 32, the strips) no
     // longer fit — bail to a legible notice instead of a broken/panicking layout.
     if area.width < layout::MIN_WIDTH || area.height < layout::MIN_HEIGHT {
-        render_too_small(frame);
+        render_too_small(frame, theme);
         return;
     }
     match state.view {
@@ -42,19 +44,19 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         View::Settings => settings::render(frame, state),
     }
     if state.show_help {
-        help::render(frame);
+        help::render(frame, theme);
     }
 }
 
 /// Centered notice shown when the terminal is smaller than `MIN_WIDTH x MIN_HEIGHT`.
-fn render_too_small(frame: &mut Frame) {
+fn render_too_small(frame: &mut Frame, theme: theme::Theme) {
     let area = frame.area();
     let msg = format!(
         "terminal too small (needs {}x{})",
         layout::MIN_WIDTH,
         layout::MIN_HEIGHT
     );
-    let style = Style::default().fg(theme::Theme::TOKYONIGHT.warn);
+    let style = Style::default().fg(theme.warn);
     let buf = frame.buffer_mut();
     let x = area.x + area.width.saturating_sub(msg.chars().count() as u16) / 2;
     let y = area.y + area.height / 2;

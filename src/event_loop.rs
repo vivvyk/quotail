@@ -65,6 +65,9 @@ pub fn initial_state(config: &Config, session: Option<Session>) -> AppState {
         config: config.clone(),
         settings_row: 0,
         mcp_listener: crate::app::McpListener::Active,
+        // Detect the terminal's color depth once, here, and lock the matching
+        // palette in for the whole session.
+        theme: crate::ui::theme::Theme::detect(),
         should_quit: false,
     };
 

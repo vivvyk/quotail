@@ -151,6 +151,13 @@ pub struct AppState {
     /// status row. Set once at startup after the bind attempt.
     pub mcp_listener: McpListener,
 
+    // ---- Presentation ----
+    /// The active color palette, chosen ONCE at startup from the detected terminal
+    /// color depth (truecolor / 256 / 16). Every renderer reads its colors from
+    /// here rather than a hardcoded truecolor constant, so a limited terminal is
+    /// handed `Color::Indexed`/ANSI names it can actually render. See `ui::theme`.
+    pub theme: crate::ui::theme::Theme,
+
     // ---- Lifecycle ----
     pub should_quit: bool,
 }

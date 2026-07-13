@@ -13,7 +13,7 @@ use crate::data::types::MarketStatus;
 use super::theme::Theme;
 
 pub fn render(buf: &mut Buffer, area: Rect, state: &AppState) {
-    let theme = Theme::TOKYONIGHT;
+    let theme = state.theme;
     let muted = Style::default().fg(theme.muted);
     let (x, y) = (area.x, area.y);
 

@@ -22,7 +22,7 @@ use super::theme::{Theme, glyph};
 use super::{bottom_bar, chart, table};
 
 pub fn render(frame: &mut Frame, state: &AppState) {
-    let theme = Theme::TOKYONIGHT;
+    let theme = state.theme;
     let area = frame.area();
     let (w, h) = (area.width, area.height);
     let buf = frame.buffer_mut();
@@ -176,9 +176,10 @@ fn render_grid(buf: &mut Buffer, state: &AppState, theme: Theme, grid_y: u16, gr
                     &columns,
                     tf_label,
                     border,
+                    theme,
                 );
             }
-            None => chart::render_empty_pane(buf, area, border),
+            None => chart::render_empty_pane(buf, area, border, theme),
         }
     }
 }
